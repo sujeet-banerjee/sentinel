@@ -31,6 +31,7 @@ class SentinelApiApplicationTests {
 	@Test
 	void contextLoads() {
 	    // Basic check to ensure the Spring context starts up
+		System.out.println("======== STARTING =========");
 	}
 	
 	@Test
