@@ -6,8 +6,12 @@
 
 This is springboot based API layer.
 
+
+
 ### Dev CLI
 
-./mvnw spring-boot:run
-./mvnw clean test
+|./mvnw spring-boot:run<br />./mvnw clean test|
+|-|
+
+
 
