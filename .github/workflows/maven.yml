@@ -6,6 +6,7 @@ on:
     paths:
       - 'sentinel-api/**' # Only run if changes are made to the API folder
       - '.github/workflows/**' # Verify we did'nt break anything modifying workflows themselves.
+  workflow_dispatch:      # THIS adds the "Run workflow" button in GitHub UI
   pull_request:
     branches: [ "main" ]
 
