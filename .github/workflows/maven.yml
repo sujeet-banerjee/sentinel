@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'sentinel-api/**' # Only run if changes are made to the API folder
+      - '.github/workflows/**' # Verify we did'nt break anything modifying workflows themselves.
   pull_request:
     branches: [ "main" ]
 
