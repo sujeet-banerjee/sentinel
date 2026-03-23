@@ -51,6 +51,9 @@
 			<optional>true</optional>
 		</dependency>
 		<dependency>
+			<!-- This tells Spring: "Whenever is this app run locally, 
+			look at compose.yaml and start those services (Redis) automatically." 
+			It manages the dependency (Redis), not your app as an image. -->
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-docker-compose</artifactId>
 			<scope>runtime</scope>

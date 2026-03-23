@@ -6,8 +6,6 @@ import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWeb
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
-import com.sentinel.api.config.SentinelApiApplication;
-
 /*
  * We explicitly point to the class here, to avoid error during test-run:
  * [ERROR] Errors:

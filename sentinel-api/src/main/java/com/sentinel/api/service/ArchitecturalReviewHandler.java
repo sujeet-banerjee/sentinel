@@ -1,0 +1,78 @@
+package com.sentinel.api.service;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.socket.WebSocketHandler;
+import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.publisher.Mono;
+
+/**
+ * 
+ * <pre>
+ * Technically, a WebSocketHandler is a piece of infrastructure logic, but we 
+ * annotate it with @Service. Reasons?
+ * 
+ * 1. By making it a @Service, Spring manages its lifecycle. Tomorrow, when we 
+ * need to call an AI Analysis Service or a Database Service, we can simply 
+ * @Autowire them into this handler.
+ * 
+ * 2. Marking it as a @Service tells Spring: "This is a functional component 
+ * of my business logic." Separation of concern: the WebSocketConfig to only 
+ * handle the "Wiring" or "Routing" (which URL goes where).
+ * 
+ * 3. Cross-cutting concerns without a sprawl: Spring’s @Service annotation 
+ * makes it easy to wrap the class in a "Proxy" to handle those cross-cutting 
+ * concerns without cluttering your code.
+ * </pre>
+ */
+@Service
+public class ArchitecturalReviewHandler implements WebSocketHandler {
+	
+	private static final Logger log = LoggerFactory.getLogger(
+			ArchitecturalReviewHandler.class);
+
+	/**
+	 * <pre>
+	 * In a standard REST controller, you return String or UserDTO because the request-response 
+	 * cycle is a "one-and-done" transaction. But a WebSocket is a long-lived connection. The 
+	 * "Agreement": The Mono<Void> doesn't represent a "value" (like a string). It represents 
+	 * the lifecycle of the connection itself.
+	 * 
+	 * Completion: As long as the Mono is "active," the WebSocket stays open. When the Mono 
+	 * completes (finishes), the connection closes. 
+	 * 
+	 * The Pipeline: By returning session.send(...), you are handing Spring a reactive pipeline.
+	 * Spring says: "I will keep this pipe open as long as there is data flowing through this 
+	 * 'send' or 'receive' flux." If you returned Mono<String>, the connection would close as soon 
+	 * as the first string was sent. 
+	 * 
+	 * Mono<Void> allows for an infinite stream of architectural critiques.
+	 * </pre>
+	 */
+    @Override
+    public Mono<Void> handle(WebSocketSession session) {
+    	log.info("New WebSocket connection established: {}", session.getId());
+    	
+        /*
+         * session.receive() -> Listens for incoming messages from the client.
+         * session.map() -> Processes the message (currently just an echo).
+         * session.textMessage() -> Wraps the string back into a WebSocket frame.
+         * session.send() -> Ships the stream back to the client.
+         * 
+         * The return type of session.send() is Mono<Void>, which signifies 
+         * the completion of the "send" operation.
+         * 
+         * For now, just echoing the message back!
+         */
+        return session.send(
+            session.receive()
+                .map(msg -> {
+                    String payload = msg.getPayloadAsText();
+                    log.debug("Received payload: {}", payload); 
+                    return session.textMessage("SENTINEL RECEIVED: " + payload);
+                })
+        ).doOnTerminate(
+        		() -> log.info("Connection closed for session: {}", session.getId()));
+    }
+}
