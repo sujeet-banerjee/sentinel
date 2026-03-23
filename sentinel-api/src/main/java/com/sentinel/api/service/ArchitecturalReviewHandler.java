@@ -5,6 +5,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketSession;
+import com.sentinel.api.model.ReviewRequest;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import reactor.core.publisher.Mono;
 
 /**
@@ -31,6 +35,15 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
 	
 	private static final Logger log = LoggerFactory.getLogger(
 			ArchitecturalReviewHandler.class);
+	
+	// Constructor Injection: Spring finds the @Service AnalysisService and plugs it in here.
+    private final AnalysisService analysisService;
+    private final ObjectMapper objectMapper;
+    
+    public ArchitecturalReviewHandler(AnalysisService analysisService, ObjectMapper objectMapper) {
+        this.analysisService = analysisService;
+        this.objectMapper = objectMapper;
+    }
 
 	/**
 	 * <pre>
@@ -65,14 +78,30 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
          * 
          * For now, just echoing the message back!
          */
-        return session.send(
-            session.receive()
-                .map(msg -> {
-                    String payload = msg.getPayloadAsText();
-                    log.debug("Received payload: {}", payload); 
-                    return session.textMessage("SENTINEL RECEIVED: " + payload);
-                })
-        ).doOnTerminate(
+    	return session.send(
+                session.receive()
+                    .doOnNext(msg -> log.debug("Inbound: {}", msg.getPayloadAsText()))
+                    .map(msg -> {
+                        try {
+                            // Attempt to parse JSON into our ReviewRequest record
+                            return objectMapper.readValue(msg.getPayloadAsText(), ReviewRequest.class);
+                        } catch (Exception e) {
+                            // Fallback: If they send plain text, we wrap it manually
+                            log.warn("Invalid JSON received, using fallback wrapper");
+                            return new ReviewRequest(msg.getPayloadAsText(), "General", 3);
+                        }
+                    })
+                    /*
+                     * flatMap is the key here. It takes one Request and 
+                     * "flattens" the Flux<String> from the service into 
+                     * the main outbound stream.
+                     */
+                    .flatMap(request -> analysisService.analyze(request))
+                    .map(text -> {
+                        log.info("Streaming: {}", text);
+                        return session.textMessage(text);
+                    })
+            ).doOnTerminate(
         		() -> log.info("Connection closed for session: {}", session.getId()));
     }
 }
