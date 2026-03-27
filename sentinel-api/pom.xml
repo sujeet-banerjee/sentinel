@@ -29,6 +29,7 @@
 	<properties>
 		<java.version>21</java.version>
 		<spring-ai.version>1.1.2</spring-ai.version>
+		<!--<spring-ai.version>1.0.0-M1</spring-ai.version>-->
 	</properties>
 	<dependencies>
 		<dependency>
@@ -80,6 +81,25 @@
 			<artifactId>reactor-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<dependency>
+		    <groupId>org.testcontainers</groupId>
+		    <artifactId>ollama</artifactId>
+		    <scope>test</scope>
+		</dependency>
+		<dependency>
+		    <groupId>org.testcontainers</groupId>
+		    <artifactId>junit-jupiter</artifactId>
+		    <scope>test</scope>
+		</dependency>
+		<dependency>
+		    <groupId>org.springframework.boot</groupId>
+		    <artifactId>spring-boot-testcontainers</artifactId>
+		    <scope>test</scope>
+		</dependency>
+		<dependency>
+	        <groupId>org.springframework.ai</groupId>
+	        <artifactId>spring-ai-starter-model-ollama</artifactId>
+	    </dependency>
 	</dependencies>
 	<dependencyManagement>
 		<dependencies>
@@ -125,5 +145,38 @@
 			</plugin>
 		</plugins>
 	</build>
-
+	
+	<profiles>
+	    <profile>
+	        <id>bake-ai</id>
+	        <build>
+	            <plugins>
+	                <plugin>
+	                    <groupId>org.codehaus.mojo</groupId>
+	                    <artifactId>exec-maven-plugin</artifactId>
+	                    <version>3.1.0</version>
+	                    <executions>
+	                        <execution>
+	                            <id>docker-build</id>
+	                            <phase>install</phase>
+	                            <goals><goal>exec</goal></goals>
+	                            <configuration>
+	                                <executable>docker</executable>
+	                                <arguments>
+	                                    <argument>build</argument>
+	                                    <argument>-t</argument>
+	                                    <argument>sentinel-ollama-llama3:latest</argument>
+	                                    <argument>-f</argument>
+	                                    <argument>src/test/resources/Ollama.Dockerfile</argument>
+	                                    <argument>.</argument>
+	                                </arguments>
+	                            </configuration>
+	                        </execution>
+	                    </executions>
+	                </plugin>
+	            </plugins>
+	        </build>
+	    </profile>
+	</profiles>
+	
 </project>

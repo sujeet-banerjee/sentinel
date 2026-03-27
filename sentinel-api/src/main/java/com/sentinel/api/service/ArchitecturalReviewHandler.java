@@ -80,7 +80,11 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
          */
     	return session.send(
                 session.receive()
-                    .doOnNext(msg -> log.debug("Inbound: {}", msg.getPayloadAsText()))
+                	// CRITICAL: Tells the server "Only expect one message, then close"
+                	//.take(1) 
+                	// Just to log
+                    .doOnNext(msg -> log.debug("INBOUND: {}", msg.getPayloadAsText()))
+                    // msg (WebSocketMessage) to ReviewRequest record (deser)
                     .map(msg -> {
                         try {
                             // Attempt to parse JSON into our ReviewRequest record
@@ -92,16 +96,20 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
                         }
                     })
                     /*
-                     * flatMap is the key here. It takes one Request and 
-                     * "flattens" the Flux<String> from the service into 
+                     * flatMap is the key here. It takes one ReviewRequest and 
+                     * "flattens" the Flux<String> from the Analysis-service into 
                      * the main outbound stream.
                      */
                     .flatMap(request -> analysisService.analyze(request))
                     .map(text -> {
-                        log.info("Streaming: {}", text);
+                        log.debug("LLM STREAMING: {}", text);
                         return session.textMessage(text);
                     })
+                    // Logging complete event!
+                    .doOnComplete(() -> log.info("Analysis Service Finished"))
+                    
             ).doOnTerminate(
-        		() -> log.info("Connection closed for session: {}", session.getId()));
+        		() -> log.info("Connection closed for session: {}", session.getId())
+        	).then();
     }
 }
