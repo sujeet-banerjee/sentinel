@@ -101,9 +101,17 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
                      * the main outbound stream.
                      */
                     .flatMap(request -> analysisService.analyze(request))
-                    .map(text -> {
-                        log.debug("LLM STREAMING: {}", text);
-                        return session.textMessage(text);
+                    .map(chunk -> {
+                    	try {
+                            String jsonResponse = objectMapper.writeValueAsString(chunk);
+                            log.info("ENRICHED STREAMING: {}", jsonResponse);
+                            return session.textMessage(jsonResponse);
+                        } catch (Exception e) {
+                            log.error("Failed to serialize SentinelChunk", e);
+                            return session.textMessage(
+                            		"{\"content\":\"Error serializing response\","
+                            		+ "\"type\":\"TEXT\"}");
+                        }
                     })
                     // Logging complete event!
                     .doOnComplete(() -> log.info("Analysis Service Finished"))

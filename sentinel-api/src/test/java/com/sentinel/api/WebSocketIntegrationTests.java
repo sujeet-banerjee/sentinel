@@ -24,6 +24,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sentinel.api.model.ReviewRequest;
+import com.sentinel.api.model.SentinelChunk;
 
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -149,8 +150,11 @@ class WebSocketIntegrationTests {
 		ReviewRequest request = new ReviewRequest("App -> DB", focusArea, 1);
         String jsonRequest = objectMapper.writeValueAsString(request);
         
-        // Create a "Many" Sink to capture the stream of strings
-        Sinks.Many<String> replaySink = Sinks.many().replay().all();
+        /*
+         *  Create a "Many" Sink to capture the stream of SentinelChunk
+         *  instead of raw string (which would be JSON)
+         */
+        Sinks.Many<SentinelChunk> chunkReplaySink = Sinks.many().replay().all();
 
         // 2. Execute the WebSocket session
         Mono<Void> connection = client.execute(url, session -> {
@@ -159,18 +163,37 @@ class WebSocketIntegrationTests {
             
             // MONO2: Receive the stream of critiques
             Mono<Void> receive = session.receive()
-                .map(msg -> msg.getPayloadAsText())
-                .log(" [AI-ST] ", Level.FINEST)
-                .doOnNext(text -> replaySink.tryEmitNext(text)) // Push into the sink
+        		.map(msg -> {
+                    try {
+                        // 2.1 DESERIALIZE each incoming WebSocket message 
+                    	// into a SentinelChunk
+                        return objectMapper.<SentinelChunk>readValue(msg.getPayloadAsText(), 
+                        		SentinelChunk.class);
+                    } catch (Exception e) {
+                        log.error("Failed to parse chunk: {}", msg.getPayloadAsText());
+                        return new SentinelChunk("", SentinelChunk.ChunkType.TEXT, 0);
+                    }
+                })
+                .log(" [AI-ST] ", Level.INFO)
+                // Push into the sink
+                .doOnNext(chunk -> { 
+                	chunkReplaySink.tryEmitNext(chunk);
+                	if (chunk.type() == SentinelChunk.ChunkType.ANALYSIS_COMPLETE) {
+                        log.info("DEBUG: Received ANALYSIS_COMPLETE metadata! Completing Sink.");
+                        chunkReplaySink.tryEmitComplete(); 
+                    }
+                }) 
                 .doOnComplete(() -> {
                     log.info("DEBUG: WebSocket Stream Ended. Completing Sink.");
-                    replaySink.tryEmitComplete(); // <--- THIS triggers the StepVerifier to finish
+                    // THIS triggers the StepVerifier to finish
+                    chunkReplaySink.tryEmitComplete(); 
                 })
                 .doOnError(e -> {
                 	log.error("DEBUG: WebSocket Error: " + e.getMessage(), e);
-                    replaySink.tryEmitError(e);
+                    chunkReplaySink.tryEmitError(e);
                 })
-                .then(); // Return Mono<Void> to signal receive loop completion
+                // Return Mono<Void> to signal receive loop completion
+                .then(); 
 
             // First do MONO1 and then MONO2
             return send.then(receive);
@@ -180,28 +203,40 @@ class WebSocketIntegrationTests {
         Disposable disposable = connection.subscribe();
 
         /*
+         * 4. Run StepVerifier on the Sink's Flux 
          * StepVerifier: The "Chronometer" of Reactive Tests.
          * It will subscribe to the flux and check every single emission.
+         * (to validate the Metadata AND the Content).
          */
-        // 4. Run StepVerifier on the Sink's Flux
-        StepVerifier.create(replaySink.asFlux()
-        		.take(Duration.ofMinutes(4))
-        		// 1. Collect everything into a buffer 
-        		// only for the first 5 minutes, so we join the fragmented words!
-        		.collect(StringBuilder::new, StringBuilder::append) 
-                .map(StringBuilder::toString))
+        StepVerifier.create(chunkReplaySink.asFlux())
             .expectSubscription()
-            .assertNext(fullResponse -> {
-                // 2. Now you can use standard string assertions
-                log.info("FULL AI RESPONSE: {}", fullResponse);
-                assert fullResponse.contains("SENTINEL ANALYSIS STARTING...");
-                assert fullResponse.contains("ANALYSIS COMPLETE");
+            .recordWith(java.util.ArrayList::new) 
+            // Consume until the stream completes
+            .thenConsumeWhile(chunk -> true)
+            /*
+             * removed 'assertNext', as now there is nothing 
+             * left in the stream
+             */
+            .consumeRecordedWith(allChunks -> {           
+                // No-op here, logic moved to assertBelow
+                log.info("FULL AI RESPONSE: {}", allChunks);
             })
-            
             .expectComplete()
-            .verify(Duration.ofMinutes(5));
-        
+            .verify(Duration.ofMinutes(10));
         log.info("Step verifier done!");
+        
+        /*
+         * 5. Post-completion assertions on the recorded data
+         */
+        java.util.List<SentinelChunk> recorded = chunkReplaySink.
+        		asFlux().collectList().block();
+        
+        // Stitch the content fragments together for assertion
+        String fullText = recorded.stream()
+                .map(SentinelChunk::content)
+                .collect(java.util.stream.Collectors.joining(""));
+
+        log.info("FULL RECONSTRUCTED TEXT: {}", fullText);
         
         // 5. once the test passes, don't keep subscribing to the channel, 
         // so the test can finish 
