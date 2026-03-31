@@ -104,7 +104,7 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
                     .map(chunk -> {
                     	try {
                             String jsonResponse = objectMapper.writeValueAsString(chunk);
-                            log.info("ENRICHED STREAMING: {}", jsonResponse);
+                            log.debug("ENRICHED STREAMING: {}", jsonResponse);
                             return session.textMessage(jsonResponse);
                         } catch (Exception e) {
                             log.error("Failed to serialize SentinelChunk", e);

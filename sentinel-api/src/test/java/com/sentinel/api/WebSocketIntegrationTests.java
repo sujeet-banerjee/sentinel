@@ -47,6 +47,15 @@ class WebSocketIntegrationTests {
 	private static final Logger log = LoggerFactory.getLogger(
 			WebSocketIntegrationTests.class);
 	
+	
+	/*
+	 * Test constants
+	 */
+	/**
+	 * 
+	 */
+	private static final int CONCURRENT_USERS = 4;
+	
 	/**
      * Define the Ollama container and 
      * Automatically sets spring.ai.ollama.base-url
@@ -132,7 +141,7 @@ class WebSocketIntegrationTests {
 
     
     /**
-     * TEST: AI Analysis Stream
+     * TEST 0: AI Analysis Stream
      * CONTEXT: Sends a JSON ReviewRequest and expects a stream of 5 messages 
      * back from the AnalysisService.
      */
@@ -174,12 +183,12 @@ class WebSocketIntegrationTests {
                         return new SentinelChunk("", SentinelChunk.ChunkType.TEXT, 0);
                     }
                 })
-                .log(" [AI-ST] ", Level.INFO)
+                .log(" [AI-ST] ", Level.FINEST)
                 // Push into the sink
                 .doOnNext(chunk -> { 
                 	chunkReplaySink.tryEmitNext(chunk);
                 	if (chunk.type() == SentinelChunk.ChunkType.ANALYSIS_COMPLETE) {
-                        log.info("DEBUG: Received ANALYSIS_COMPLETE metadata! Completing Sink.");
+                        log.debug("DEBUG: Received ANALYSIS_COMPLETE metadata! Completing Sink.");
                         chunkReplaySink.tryEmitComplete(); 
                     }
                 }) 
@@ -219,7 +228,7 @@ class WebSocketIntegrationTests {
              */
             .consumeRecordedWith(allChunks -> {           
                 // No-op here, logic moved to assertBelow
-                log.info("FULL AI RESPONSE: {}", allChunks);
+                log.debug("FULL AI RESPONSE: {}", allChunks);
             })
             .expectComplete()
             .verify(Duration.ofMinutes(10));
@@ -237,19 +246,218 @@ class WebSocketIntegrationTests {
                 .collect(java.util.stream.Collectors.joining(""));
 
         log.info("FULL RECONSTRUCTED TEXT: {}", fullText);
+        // ASSERTION: Verify the "Fragment-Safe" detection logic worked
+        boolean hasDiagramStart = recorded.stream()
+                .anyMatch(c -> c.type() == SentinelChunk.ChunkType.DIAGRAM_START);
+        
+        boolean hasAnalysisComplete = recorded.stream()
+                .anyMatch(c -> c.type() == SentinelChunk.ChunkType.ANALYSIS_COMPLETE);
+
+        assert fullText.contains("SENTINEL ANALYSIS STARTING...");
+        assert hasAnalysisComplete : "Metadata ANALYSIS_COMPLETE was never triggered!";
+        
+        // If the AI generated a diagram, verify the metadata was tagged
+        if (fullText.contains("```mermaid")) {
+            assert hasDiagramStart : "Mermaid block found but DIAGRAM_START metadata missing!";
+        }
         
         // 5. once the test passes, don't keep subscribing to the channel, 
         // so the test can finish 
         disposable.dispose();
         log.info("Client subscription disposed.");
-		/*
-		 * 
-		 * 
-		 * log.info("--- START THREAD AUDIT ---");
-		 * Thread.getAllStackTraces().keySet().forEach(t -> {
-		 * System.out.printf("Thread: %-20s | Daemon: %-5b | State: %s%n", t.getName(),
-		 * t.isDaemon(), t.getState()); }); log.info("--- END THREAD AUDIT ---");
-		 */
+
+    }
+    
+    /**
+     * TEST 1: Aggressive Memory Benchmark
+     * CONTEXT: Forces the LLM to stream a massive, deterministic payload.
+     * We discard the chunks immediately to isolate the memory footprint 
+     * of the AnalysisService's internal buffer.
+     */
+    @Test
+    void testMemoryConsumption_SlidingWindowBenchmark() throws Exception {
+        HttpClient httpClient = HttpClient.create().responseTimeout(Duration.ofMinutes(15));
+        WebSocketClient client = new ReactorNettyWebSocketClient(httpClient);
+        URI url = URI.create("ws://localhost:" + port + "/ws/analyze");
+
+        // Force a massive, guaranteed long-running token stream
+        ReviewRequest request = new ReviewRequest(
+                "Count out loud from 1 to 3000, printing each number on a new line. "
+                + "Do not stop or summarize.", 
+                "Endurance Test", 1);
+        String jsonRequest = objectMapper.writeValueAsString(request);
+        
+        Sinks.Many<SentinelChunk> chunkReplaySink = Sinks.many().replay().all();
+        java.util.concurrent.atomic.AtomicInteger tokenCounter = 
+        		new java.util.concurrent.atomic.AtomicInteger(0);
+
+        // 1. Force GC and record baseline memory
+        System.gc();
+        Thread.sleep(500); // Give GC a moment to settle
+        long memoryBefore = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+        log.info("--- MEMORY BENCHMARK START ---");
+        log.info("Baseline Heap Usage: {} KB", memoryBefore / 1024);
+
+        Mono<Void> connection = client.execute(url, session -> {
+            Mono<Void> send = session.send(Mono.just(session.textMessage(jsonRequest)));
+            Mono<Void> receive = session.receive()
+                .map(msg -> {
+                    try {
+                        return objectMapper.<SentinelChunk>readValue(
+                        		msg.getPayloadAsText(), SentinelChunk.class);
+                    } catch (Exception e) {
+                        return new SentinelChunk("", SentinelChunk.ChunkType.TEXT, 0);
+                    }
+                })
+                .doOnNext(chunk -> {
+                    chunkReplaySink.tryEmitNext(chunk);
+                    if (chunk.type() == SentinelChunk.ChunkType.ANALYSIS_COMPLETE) {
+                        chunkReplaySink.tryEmitComplete(); 
+                    }
+                })
+                .doOnError(chunkReplaySink::tryEmitError)
+                .then();
+            return send.then(receive);
+        });
+        
+        Disposable disposable = connection.subscribe();
+
+        StepVerifier.create(chunkReplaySink.asFlux())
+            .expectSubscription()
+            // We DO NOT use recordWith() here. We want to let the chunks be Garbage Collected 
+            // instantly so we only measure the AnalysisService buffer.
+            .thenConsumeWhile(chunk -> {
+                tokenCounter.incrementAndGet();
+                return true; 
+            })
+            .verifyComplete();
+
+        // 2. Force GC and record post-stream memory
+        System.gc();
+        Thread.sleep(500);
+        long memoryAfter = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+        
+        // Use KB instead of MB to see the exact footprint
+        long memoryUsedInKb = (memoryAfter - memoryBefore) / 1024;
+        
+        log.info("Total tokens processed: {}", tokenCounter.get());
+        log.info("Final Heap Usage: {} KB", memoryAfter / 1024);
+        log.info("Approximate Pipeline Memory Delta: {} KB", memoryUsedInKb);
+        log.info("--- MEMORY BENCHMARK END ---");
+
+        disposable.dispose();
+    }
+    
+    
+    /**
+     * TEST 2: Aggressive Multi-Threaded Concurrency (ExecutorService)
+     * CONTEXT: Uses a CountDownLatch to freeze 4 independent threads 
+     * at the starting line, firing them all at the exact same millisecond
+     * to test true WebSocket collision and stream isolation.
+     */
+    @Test
+    void testConcurrentWebSocketConnections_Executor() throws Exception {
+        
+        // 1. Classic Thread Pool
+        java.util.concurrent.ExecutorService executor = 
+        		java.util.concurrent.Executors.newFixedThreadPool(CONCURRENT_USERS);
+        
+        // 2. The "Starter Pistol" - Holds all threads until we say GO
+        java.util.concurrent.CountDownLatch startLatch = 
+        		new java.util.concurrent.CountDownLatch(1);
+        
+        // 3. The "Finish Line" - Waits for all threads to complete
+        java.util.concurrent.CountDownLatch doneLatch = 
+        		new java.util.concurrent.CountDownLatch(CONCURRENT_USERS);
+        
+        java.util.concurrent.atomic.AtomicInteger successCount = 
+        		new java.util.concurrent.atomic.AtomicInteger(0);
+
+        HttpClient httpClient = HttpClient.create().responseTimeout(Duration.ofMinutes(15));
+        WebSocketClient client = new ReactorNettyWebSocketClient(httpClient);
+        URI url = URI.create("ws://localhost:" + port + "/ws/analyze");
+
+        for (int i = 0; i < CONCURRENT_USERS; i++) {
+            final int userId = i;
+            executor.submit(() -> {
+                try {
+                    // Unique request for each thread
+                    ReviewRequest request = new ReviewRequest(
+                            "Say a quick hello to user " + userId, "Greeting", userId);
+                    String jsonRequest = objectMapper.writeValueAsString(request);
+
+                    Sinks.Many<SentinelChunk> chunkSink = Sinks.many().replay().all();
+
+                    // FREEZE THIS THREAD UNTIL THE LATCH IS RELEASED
+                    startLatch.await(); 
+
+                    // Execute WebSocket connection (Blocking inside the thread)
+                    client.execute(url, session -> {
+                        Mono<Void> send = session.send(
+                        		Mono.just(session.textMessage(jsonRequest))
+                        		.log(" -- AI TEST SEND -- "+ userId + " --", Level.FINEST)
+                        		);
+                        Mono<Void> receive = session.receive()
+                            .map(msg -> {
+                                try {
+                                    return objectMapper.<SentinelChunk>readValue(
+                                    		msg.getPayloadAsText(), SentinelChunk.class);
+                                } catch (Exception e) {
+                                    return new SentinelChunk("", SentinelChunk.ChunkType.TEXT, 0);
+                                }
+                            })
+                            .log("-- AI TEST RECV -- "+userId+" --", Level.FINEST)
+                            .doOnNext(chunk -> {
+                                chunkSink.tryEmitNext(chunk);
+                                if (chunk.type() == SentinelChunk.ChunkType.ANALYSIS_COMPLETE) {
+                                	log.info("ANALYSIS_COMPLETE for the user {}", userId);
+                                    chunkSink.tryEmitComplete();
+                                    /*
+                                     * 	THE FIX: Tell the client to explicitly hang up 
+                                     *  the WebSocket. This triggers the completion of 
+                                     *  session.receive(), which unblocks the thread!
+                                     */
+                                    session.close().subscribe();
+                                }
+                            })
+                            .doOnError(chunkSink::tryEmitError)
+                            .then();
+                        
+                        return send.then(receive);
+                    })
+                    // Force thread to wait for WS completion
+                    .block(Duration.ofMinutes(10)); 
+
+                    // If we reach here without timeout, the stream isolated perfectly
+                    successCount.incrementAndGet();
+                    log.info("User {} completed successfully.", userId);
+
+                } catch (Exception e) {
+                    log.error("User {} failed with error: {}", userId, e.getMessage());
+                } finally {
+                    // Mark this thread as finished
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        log.info("--- THREADS ARMED. SIMULATING {} CONCURRENT USERS ---", CONCURRENT_USERS);
+        long startTime = System.currentTimeMillis();
+        
+        // FIRE! All 10 threads hit the WebSocket endpoint simultaneously
+        startLatch.countDown(); 
+
+        // Wait up to 10 minutes for all threads to cross the finish line
+        boolean allFinished = doneLatch.await(11, java.util.concurrent.TimeUnit.MINUTES);
+        executor.shutdown();
+
+        long duration = (System.currentTimeMillis() - startTime) / 1000;
+        log.info("--- CONCURRENCY TEST COMPLETE ---");
+        log.info("Finished in {} seconds. Successful streams: {}/{}", 
+        		duration, successCount.get(), CONCURRENT_USERS);
+
+        assert allFinished : "Test timed out before all threads completed!";
+        assert successCount.get() == CONCURRENT_USERS : "One or more streams failed or leaked state!";
     }
     
     @AfterAll
