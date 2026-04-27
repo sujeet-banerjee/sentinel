@@ -1,5 +1,7 @@
 package com.sentinel.api.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.ollama.OllamaChatModel;
@@ -10,9 +12,12 @@ import com.sentinel.api.model.SentinelChunk;
 import com.sentinel.api.model.SentinelChunk.ChunkType;
 
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 @Service
 public class AnalysisService {
+	private static final Logger log = LoggerFactory.getLogger(
+			AnalysisService.class);
 	
 	/**
 	 * Auto injected through contructor injection
@@ -49,11 +54,19 @@ public Flux<SentinelChunk> analyze(ReviewRequest request) {
          *  Flux.defer() ensures 500 separate StringBuilder instances are created. 
          *  No data bleeding between users.
          */
-        return Flux.defer(() -> {
+        return Mono.deferContextual(
+        		ctx -> Mono.just(ctx.getOrDefault(Constants.TENANT_ID, 
+        				Constants.UNKNOWN_TENANT)))
+                .flatMapMany(tenantId -> Flux.defer(() -> {
             
             // The Memory Buffer to stitch fragments together
             //StringBuilder conversationBuffer = new StringBuilder();
             StringBuilder slidingWindow = new StringBuilder(MAX_WINDOW_SIZE * 2);
+            
+         // 2. We now have absolute context of WHO is requesting this analysis
+            // In Week 3, we will use this tenantId to filter PGVector RAG results!
+            log.info("[TENANT: {}] Commencing Architectural Review for focus area: {}", 
+            		tenantId, request.focusArea());
             
             /*
              *  State flags to ensure we only emit the signal ONCE.
@@ -91,6 +104,6 @@ public Flux<SentinelChunk> analyze(ReviewRequest request) {
                         // 4. Emit the original token, but with the intelligent metadata attached
                         return new SentinelChunk(token, type, System.currentTimeMillis());
                     });
-        });
+        }));
     }
 }

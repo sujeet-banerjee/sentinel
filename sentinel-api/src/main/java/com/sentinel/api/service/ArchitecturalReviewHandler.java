@@ -10,6 +10,7 @@ import com.sentinel.api.model.ReviewRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import reactor.core.publisher.Mono;
+import reactor.util.context.Context;
 
 /**
  * 
@@ -28,6 +29,10 @@ import reactor.core.publisher.Mono;
  * 3. Cross-cutting concerns without a sprawl: Spring’s @Service annotation 
  * makes it easy to wrap the class in a "Proxy" to handle those cross-cutting 
  * concerns without cluttering your code.
+ * 
+ * 4. We will extract a X-Tenant-ID during the WebSocket handshake and seamlessly 
+ * pass it down the pipeline into the  AnalysisService without polluting the 
+ * method signatures.
  * </pre>
  */
 @Service
@@ -65,8 +70,17 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
 	 */
     @Override
     public Mono<Void> handle(WebSocketSession session) {
-    	log.info("New WebSocket connection established: {}", session.getId());
+    	String tenantId = session.getHandshakeInfo().
+    			getHeaders().getFirst(Constants.HEADER_TENANT_ID);
     	
+    	// Fallback for local testing if the header isn't provided
+        final String resolvedTenantId = (tenantId != null && !tenantId.isEmpty()) 
+                                        ? tenantId 
+                                        : Constants.DEFAULT_LOCAL_TENANT;
+    	
+        log.info("New WebSocket connection established: {} for Tenant: {}", 
+        		session.getId(), resolvedTenantId);
+        
         /*
          * session.receive() -> Listens for incoming messages from the client.
          * session.map() -> Processes the message (currently just an echo).
@@ -114,10 +128,12 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
                         }
                     })
                     // Logging complete event!
-                    .doOnComplete(() -> log.info("Analysis Service Finished"))
-                    
-            ).doOnTerminate(
-        		() -> log.info("Connection closed for session: {}", session.getId())
-        	).then();
+                    .doOnComplete(() -> log.info("Analysis Service Finished")))
+    		.doOnTerminate(
+        		() -> log.info("Connection closed for session: {}", session.getId()))
+    		.contextWrite(
+    			// Inject the Tenant ID into the reactive pipeline's memory	
+    			Context.of(Constants.TENANT_ID, resolvedTenantId))
+    		.then();
     }
 }
