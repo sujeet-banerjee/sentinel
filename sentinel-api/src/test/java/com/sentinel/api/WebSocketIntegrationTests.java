@@ -56,13 +56,9 @@ class WebSocketIntegrationTests {
 	 */
 	private static final int CONCURRENT_USERS = 4;
 	
-	/**
-     * Define the Ollama container and 
-     * Automatically sets spring.ai.ollama.base-url
-     */
-    @Container 
-    
-    /*
+	 
+    /**
+     * <pre>
      * 1. NOT USING: org.testcontainers.ollama.OllamaContainer
      * WHY:
      * The container is tuned to run on NVDIA gpus, and somehow did NOT
@@ -96,10 +92,16 @@ class WebSocketIntegrationTests {
 	 * asks Docker "What random port did you give me?", and then injects that into 
 	 * Spring's environment.
      *  ----------------------------------
+     *  </pre>
      */
-    
+	@SuppressWarnings({ "rawtypes", "resource" })
+	/*
+     * Define the Ollama container and 
+     * Automatically sets spring.ai.ollama.base-url
+     */
+    @Container
     static final GenericContainer ollama = new GenericContainer<>(
-            // Replace 'your-github-user' with your actual GitHub username
+            // TODO read from the DB / Config
             DockerImageName.parse(
             		"ghcr.io/sujeet-banerjee/sentinel/sentinel-ollama-llama3:latest")
         )
@@ -108,6 +110,16 @@ class WebSocketIntegrationTests {
         .withReuse(true) // 1. Allow the container to persist
         .waitingFor(Wait.forHttp("/").forStatusCode(200))
         .withStartupTimeout(Duration.ofMinutes(20));
+	
+	/*
+	 *  DAY 7: REDIS TESTCONTAINER
+	 */
+    @SuppressWarnings("resource")
+	@Container
+    static final GenericContainer<?> redis = new GenericContainer<>(
+    		DockerImageName.parse("redis:7-alpine"))
+        .withExposedPorts(6379)
+        .withReuse(true);
     
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
@@ -116,6 +128,15 @@ class WebSocketIntegrationTests {
     			ollama.getContainerId(),
     			ollama.getContainerName());
     	
+    	
+    	redis.start();
+    	log.info("Test Redis Container started: {} --> ", 
+    			redis.getContainerId(), 
+    			redis.getContainerName());
+    	
+    	/*
+    	 * - - - OLLAMA Config - - -
+    	 */
         // THIS IS THE KEY: We override the 'localhost:11434' default
         // with the actual dynamic port from Testcontainers.
         registry.add("spring.ai.ollama.base-url", 
@@ -126,6 +147,12 @@ class WebSocketIntegrationTests {
         
         // For Spring WebFlux, sometimes the underlying Netty needs this:
         registry.add("spring.codec.max-in-memory-size", () -> "10MB");
+        
+        /*
+    	 * - - - REDIS Config - - -
+    	 */
+        registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379).toString());
     }
 	
 

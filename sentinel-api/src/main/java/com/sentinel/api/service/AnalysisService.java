@@ -14,6 +14,28 @@ import com.sentinel.api.model.SentinelChunk.ChunkType;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+/**
+ * The core domain service orchestrating the Generative AI architectural review process.
+ * * <p><b>Main Purpose:</b></p>
+ * This service bridges the application layer and the AI inference engine. It takes an inbound 
+ * {@link com.sentinel.api.model.ReviewRequest}, applies strict system prompts, and manages 
+ * the lifecycle of the reactive LLM token stream. 
+ * * <p><b>Encapsulated Details:</b></p>
+ * <ul>
+ * <li><b>Context Propagation:</b> Safely extracts multitenancy identifiers (e.g., {@code X-Sentinel-Tenant-ID}) 
+ * from the Reactor {@link reactor.util.context.Context}, ensuring tenant isolation without 
+ * polluting the method signatures.</li>
+ * <li><b>Thread Isolation:</b> Wraps the entire generation pipeline in {@link reactor.core.publisher.Flux#defer()}, 
+ * guaranteeing that local state variables (like trigger flags) are instantiated uniquely per 
+ * WebSocket session and are immune to multi-threading race conditions.</li>
+ * <li><b>Memory Optimization (Sliding Window):</b> Implements a highly optimized, capped-capacity 
+ * {@link java.lang.StringBuilder} to track multi-token phrases (e.g., "ANALYSIS COMPLETE"). 
+ * This O(1) space complexity algorithm prevents unbounded heap growth and protects against 
+ * Out-Of-Memory (OOM) errors during massive LLM responses.</li>
+ * <li><b>DTO Mapping:</b> Transforms the raw {@link org.springframework.ai.chat.model.ChatResponse} 
+ * into a structured stream of {@link com.sentinel.api.model.SentinelChunk} objects.</li>
+ * </ul>
+ */
 @Service
 public class AnalysisService {
 	private static final Logger log = LoggerFactory.getLogger(

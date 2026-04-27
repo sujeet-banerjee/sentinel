@@ -6,9 +6,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import com.sentinel.api.model.ReviewRequest;
-
+import com.sentinel.api.model.SentinelChunk;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.context.Context;
 
@@ -30,7 +31,7 @@ import reactor.util.context.Context;
  * makes it easy to wrap the class in a "Proxy" to handle those cross-cutting 
  * concerns without cluttering your code.
  * 
- * 4. We will extract a X-Tenant-ID during the WebSocket handshake and seamlessly 
+ * 4. We extract a X-Tenant-ID during the WebSocket handshake and seamlessly 
  * pass it down the pipeline into the  AnalysisService without polluting the 
  * method signatures.
  * </pre>
@@ -41,13 +42,21 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
 	private static final Logger log = LoggerFactory.getLogger(
 			ArchitecturalReviewHandler.class);
 	
-	// Constructor Injection: Spring finds the @Service AnalysisService and plugs it in here.
+	/*
+	 *  Constructor Injection: Spring finds the 
+	 *  @Service AnalysisService and plugs it in here.
+	 */
     private final AnalysisService analysisService;
     private final ObjectMapper objectMapper;
+	private RateLimiterService rateLimiterService;
     
-    public ArchitecturalReviewHandler(AnalysisService analysisService, ObjectMapper objectMapper) {
+    public ArchitecturalReviewHandler(
+    		AnalysisService analysisService,
+    		RateLimiterService rateLimiterService,
+    		ObjectMapper objectMapper) {
         this.analysisService = analysisService;
         this.objectMapper = objectMapper;
+        this.rateLimiterService = rateLimiterService;
     }
 
 	/**
@@ -114,7 +123,34 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
                      * "flattens" the Flux<String> from the Analysis-service into 
                      * the main outbound stream.
                      */
-                    .flatMap(request -> analysisService.analyze(request))
+                    // --- DAY 7: RATE LIMITER INTERCEPTION ---
+                    .flatMap(request -> rateLimiterService.isAllowed(tenantId)
+                        .flatMapMany(rateLimitResult -> {
+                        	boolean isAllowed = rateLimitResult.getFirst();
+                            long waitSeconds = rateLimitResult.getSecond();
+                            
+                            if (!isAllowed) {
+                                /*
+                                 * If blocked, emit a single error chunk and 
+                                 * cleanly terminate this sub-stream
+                                 */
+                                SentinelChunk rejection = new SentinelChunk(
+                                		String.format(
+                                				Constants.ERR_TEMPL_RATE_LIMIT_EXCEED, 
+                                				waitSeconds),
+                                        SentinelChunk.ChunkType.RATE_LIMIT_EXCEEDED, 
+                                        System.currentTimeMillis());
+                                return Flux.just(rejection);
+                            }
+                            
+                            // If allowed, proceed to the expensive LLM execution
+                            return analysisService.analyze(request);
+                        })
+                    )
+                    /*
+                     * We got the SentinelChunk!
+                     * Now, Write the response (as serialized string)
+                     */
                     .map(chunk -> {
                     	try {
                             String jsonResponse = objectMapper.writeValueAsString(chunk);
