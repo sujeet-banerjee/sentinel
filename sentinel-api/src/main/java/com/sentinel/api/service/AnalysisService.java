@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.ollama.OllamaChatModel;
+import org.springframework.data.util.Pair;
 import org.springframework.stereotype.Service;
 
 import com.sentinel.api.model.ReviewRequest;
@@ -45,29 +46,36 @@ public class AnalysisService {
 	 * Auto injected through contructor injection
 	 */
 	private final OllamaChatModel chatModel;
+	private final ConversationalMemoryService memoryService;
 	
 	private static final String SYST_PROMPT_TEMPLATE = 
-			"You are an expert Software Architect. "
+			"You are Sentinel, an expert Software Architect. "
+			//
 			+ "Critique the following architecture focusing on %s. "
 			+ "1. Use standard Markdown for text. "
 			+ "2. If illustrating a flow or structure, "
 			+ "you MUST use a Mermaid.js block: ```mermaid [code] ```. "
 			+ "3. Always begin with 'SENTINEL ANALYSIS STARTING...'. "
-			+ "4. Always conclude with the exact string: 'ANALYSIS COMPLETE'. \n\n %s";
+			+ "4. Always conclude with the exact string: 'ANALYSIS COMPLETE'. \n\n "
+			+ "%s \n\n" // Memory
+			+ "CURRENT REQUEST: %s";
 
 	private static final int MAX_WINDOW_SIZE = 64;
 	
-	public AnalysisService(OllamaChatModel chatModel) {
+	/**
+	 * 
+	 * @param chatModel
+	 * @param memoryService
+	 */
+	public AnalysisService(OllamaChatModel chatModel, 
+			ConversationalMemoryService memoryService) {
         this.chatModel = chatModel;
+		this.memoryService = memoryService;
     }
 
 	
 public Flux<SentinelChunk> analyze(ReviewRequest request) {
     	
-    	String systemPrompt = String.format(
-    			SYST_PROMPT_TEMPLATE, request.focusArea(), 
-    			request.content());
-
         /*
          *  Flux.defer ensures every new request gets 
          *  its own fresh state variables.
@@ -76,56 +84,104 @@ public Flux<SentinelChunk> analyze(ReviewRequest request) {
          *  Flux.defer() ensures 500 separate StringBuilder instances are created. 
          *  No data bleeding between users.
          */
-        return Mono.deferContextual(
-        		ctx -> Mono.just(ctx.getOrDefault(Constants.TENANT_ID, 
-        				Constants.UNKNOWN_TENANT)))
-                .flatMapMany(tenantId -> Flux.defer(() -> {
-            
-            // The Memory Buffer to stitch fragments together
-            //StringBuilder conversationBuffer = new StringBuilder();
-            StringBuilder slidingWindow = new StringBuilder(MAX_WINDOW_SIZE * 2);
-            
-         // 2. We now have absolute context of WHO is requesting this analysis
-            // In Week 3, we will use this tenantId to filter PGVector RAG results!
-            log.info("[TENANT: {}] Commencing Architectural Review for focus area: {}", 
-            		tenantId, request.focusArea());
-            
-            /*
-             *  State flags to ensure we only emit the signal ONCE.
-             *  Array used for access from lambda (.map)
-             */
-            boolean[] diagramTriggered = {false};
-            boolean[] completeTriggered = {false};
+        return Mono.deferContextual(ctx -> { 
+    			String tenantId = ctx.getOrDefault("TENANT_ID", "UNKNOWN_TENANT");
+                String sessionId = ctx.getOrDefault("SESSION_ID", "UNKNOWN_SESSION");
+    			return Mono.just(Pair.<String, String>of(tenantId, sessionId)); 
+    		})
+        	// ids ==> Id Pair
+            .flatMapMany(ids -> {
+            	String tenantId = ids.getFirst();
+                String sessionId = ids.getSecond();
+                
+                // -2. Fetch History from Redis
+                return memoryService.getHistory(tenantId, 
+                			sessionId).flatMapMany(history -> {
+                    
+                    // -1. Build the Context-Aware Prompt
+                    String finalPrompt = String.format(
+                            SYST_PROMPT_TEMPLATE, 
+                            request.focusArea(), 
+                            history, 
+                            request.content());
 
-            return chatModel.stream(new Prompt(systemPrompt))
-                    .map(ChatResponse::getResult)
-                    .map(result -> result.getOutput().getText())
-                    .filter(text -> text != null && !text.isEmpty())
-                    .map(token -> {
-                        // 1. Accumulate the fragments into the memory buffer
-                    	slidingWindow.append(token);
-                    	
-                    	// 2. Truncate from the front to maintain the sliding window
-                        if (slidingWindow.length() > MAX_WINDOW_SIZE) {
-                            slidingWindow.delete(0, slidingWindow.length() - MAX_WINDOW_SIZE);
-                        }
-                        String memory = slidingWindow.toString();
-                        
-                        ChunkType type = ChunkType.TEXT;
-                        
-                        // 3. Check the accumulated memory, not the isolated token
-                        if (!diagramTriggered[0] && memory.contains("```mermaid")) {
-                            type = ChunkType.DIAGRAM_START;
-                            diagramTriggered[0] = true; // Lock it so it only fires once
-                        } 
-                        else if (!completeTriggered[0] && memory.contains("ANALYSIS COMPLETE")) {
-                            type = ChunkType.ANALYSIS_COMPLETE;
-                            completeTriggered[0] = true; // Lock it so it only fires once
-                        }
-                        
-                        // 4. Emit the original token, but with the intelligent metadata attached
-                        return new SentinelChunk(token, type, System.currentTimeMillis());
-                    });
-        }));
+                    log.info("[TENANT: {} | SESSION: {}] Commencing Review. History size: {} chars", 
+                            tenantId, sessionId, history.length());
+                
+	            	return Flux.defer(() -> {
+	            
+			            // The Memory Buffer to stitch fragments together
+			            //StringBuilder conversationBuffer = new StringBuilder();
+			            StringBuilder slidingWindow = new StringBuilder(MAX_WINDOW_SIZE * 2);
+			            
+			            // 2. We now have absolute context of WHO is requesting this analysis
+			            // In Week 3, we will use this tenantId to filter PGVector RAG results!
+			            log.info("[TENANT: {}] Commencing Architectural Review for focus area: {}", 
+			            		tenantId, request.focusArea());
+			            
+			            // Day 8: THE BOUNDED RECORDER: Protects JVM heap while capturing context for memory
+	                    final int MAX_MEMORY_RECORD_SIZE = 2000;
+	                    StringBuilder memoryRecorder = new StringBuilder(MAX_MEMORY_RECORD_SIZE + 50);
+	                    boolean[] memoryTruncated = {false};
+			            
+			            /*
+			             *  State flags to ensure we only emit the signal ONCE.
+			             *  Array used for access from lambda (.map)
+			             */
+			            boolean[] diagramTriggered = {false};
+			            boolean[] completeTriggered = {false};
+			
+			            return chatModel.stream(new Prompt(finalPrompt))
+		                    .map(ChatResponse::getResult)
+		                    .map(result -> result.getOutput().getText())
+		                    .filter(text -> text != null && !text.isEmpty())
+		                    .map(token -> {
+		                        // 1. Accumulate the fragments into the memory buffer
+		                    	slidingWindow.append(token);
+		                    	
+		                    	// 2. Truncate from the front to maintain the sliding window
+		                        if (slidingWindow.length() > MAX_WINDOW_SIZE) {
+		                            slidingWindow.delete(0, slidingWindow.length() - MAX_WINDOW_SIZE);
+		                        }
+		                        
+		                        // 2.2 Day 8: Bounded recording for Redis History (Capped Memory)
+                                if (!memoryTruncated[0]) {
+                                    if (memoryRecorder.length() + token.length() <= MAX_MEMORY_RECORD_SIZE) {
+                                        memoryRecorder.append(token);
+                                    } else {
+                                        memoryRecorder.append("\n...[TRUNCATED FOR MEMORY]");
+                                        memoryTruncated[0] = true;
+                                    }
+                                }
+                                
+		                        String memory = slidingWindow.toString();
+		                        
+		                        ChunkType type = ChunkType.TEXT;
+		                        
+		                        // 3. Check the accumulated memory, not the isolated token
+		                        if (!diagramTriggered[0] && memory.contains("```mermaid")) {
+		                            type = ChunkType.DIAGRAM_START;
+		                            diagramTriggered[0] = true; // Lock it so it only fires once
+		                        } 
+		                        else if (!completeTriggered[0] && memory.contains("ANALYSIS COMPLETE")) {
+		                            type = ChunkType.ANALYSIS_COMPLETE;
+		                            completeTriggered[0] = true; // Lock it so it only fires once
+		                        }
+		                        
+		                        // 4. Emit the original token, but with the intelligent metadata attached
+		                        return new SentinelChunk(token, type, System.currentTimeMillis());
+		                    }) //chatModel.stream
+		                    // 5. Asynchronously save to Redis when the stream finishes
+                            .doOnComplete(() -> {
+                                memoryService.saveInteraction(
+                                        tenantId, 
+                                        sessionId, 
+                                        request.content(), 
+                                        memoryRecorder.toString()
+                                ).subscribe(); // Fire and forget
+                            });
+		            });// defer
+                }); // memoryService.getHistory
+            }); //flatMapMany
     }
 }

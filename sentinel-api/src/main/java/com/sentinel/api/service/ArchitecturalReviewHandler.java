@@ -168,8 +168,12 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
     		.doOnTerminate(
         		() -> log.info("Connection closed for session: {}", session.getId()))
     		.contextWrite(
-    			// Inject the Tenant ID into the reactive pipeline's memory	
-    			Context.of(Constants.TENANT_ID, resolvedTenantId))
+    			/*
+    			 * Inject the Tenant ID and Session ID into the reactive pipeline's context
+    			 * Both used as the composite key to access Redis memory
+    			 */
+    			Context.of(Constants.TENANT_ID, resolvedTenantId, 
+    					Constants.SESSION_ID, session.getId()))
     		.then();
     }
 }

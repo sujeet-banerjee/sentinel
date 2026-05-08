@@ -1,7 +1,19 @@
 services:
   redis:
-    image: 'redis/redis-stack:latest'
-    labels:
-      - "org.springframework.boot.service-connection=redis"
+    image: redis:7-alpine
+    container_name: sentinel-redis
     ports:
-      - '6379'
+      - "6379:6379"
+    restart: unless-stopped
+
+  # DAY 9 PREVIEW: We will uncomment this tomorrow for RAG!
+  # pgvector:
+  #   image: pgvector/pgvector:pg16
+  #   container_name: sentinel-postgres
+  #   environment:
+  #     POSTGRES_USER: sentinel
+  #     POSTGRES_PASSWORD: password
+  #     POSTGRES_DB: sentinel_db
+  #   ports:
+  #     - "5432:5432"
+  #   restart: unless-stopped
