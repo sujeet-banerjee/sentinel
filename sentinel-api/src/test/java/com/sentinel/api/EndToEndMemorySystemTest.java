@@ -13,6 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -21,6 +22,8 @@ import reactor.test.StepVerifier;
 import reactor.util.context.Context;
 
 import static org.assertj.core.api.Assertions.assertThat;
+
+import java.time.Duration;
 
 /**
  * Test for the context memory
@@ -37,15 +40,59 @@ class EndToEndMemorySystemTest {
     static final GenericContainer<?> redis = new GenericContainer<>(
     		DockerImageName.parse("redis:7-alpine"))
             .withExposedPorts(6379);
+    
+    
+    @SuppressWarnings({ "rawtypes", "resource" })
+	/*
+     * Define the Ollama container and 
+     * Automatically sets spring.ai.ollama.base-url
+     */
+    @Container
+    static final GenericContainer ollama = new GenericContainer<>(
+            // TODO read from the DB / Config
+            DockerImageName.parse(
+            		"ghcr.io/sujeet-banerjee/sentinel/sentinel-ollama-llama3:latest")
+        )
+        .withExposedPorts(11434)
+        .withEnv("OLLAMA_SKIP_GPU_CHECK", "true")
+        .withReuse(true) // 1. Allow the container to persist
+        .waitingFor(Wait.forHttp("/").forStatusCode(200))
+        .withStartupTimeout(Duration.ofMinutes(20));
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
+    	ollama.start();
+    	log.info("Test Ollama Container started: {} --> ",
+    			ollama.getContainerId(),
+    			ollama.getContainerName());
+    	
+    	log.info("Test Redis Container started (Already): {} --> ", 
+    			redis.getContainerId(), 
+    			redis.getContainerName());
+    	
+    	/*
+    	 * - - - OLLAMA Config - - -
+    	 */
+        // THIS IS THE KEY: We override the 'localhost:11434' default
+        // with the actual dynamic port from Testcontainers.
+        registry.add("spring.ai.ollama.base-url", 
+            () -> "http://" + ollama.getHost() + ":" + ollama.getMappedPort(11434));
+        
+        // Force the Ollama client to wait for the slow CPU-based model load
+        registry.add("spring.ai.ollama.chat.options.timeout", () -> "30m");
+        
+        // For Spring WebFlux, sometimes the underlying Netty needs this:
+        registry.add("spring.codec.max-in-memory-size", () -> "10MB");
+        
+        /*
+    	 * - - - REDIS Config - - -
+    	 */
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379).toString());
-        /* Note: We are NOT mocking Ollama. We are letting Spring 
-         * connect to your real local Ollama container!
-         */
-        registry.add("spring.ai.ollama.base-url", () -> "http://localhost:11434");
+//        /* Note: We are NOT mocking Ollama. We are letting Spring 
+//         * connect to your real local Ollama container!
+//         */
+//        registry.add("spring.ai.ollama.base-url", () -> "http://localhost:11434");
     }
 
     @Autowired
