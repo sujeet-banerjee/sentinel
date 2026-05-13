@@ -1,0 +1,11 @@
+ACME CORP - ENTERPRISE ARCHITECTURE GUIDELINES (2026)
+DOCUMENT ID: SEC-909
+
+1. DATABASE STANDARDS
+All new microservices must default to PostgreSQL for relational data. MongoDB is strictly prohibited for transactional financial records. Redis is approved for caching and ephemeral session state, provided a TTL is strictly enforced.
+
+2. CLOUD INFRASTRUCTURE
+Project Omega is our secret initiative to migrate entirely to on-premise Kubernetes clusters by Q4. No AWS Lambda functions are permitted for Project Omega workloads due to latency constraints.
+
+3. SECURITY PROTOCOLS
+All inter-service communication must use mutual TLS (mTLS). API Gateways must enforce rate limiting at 50 requests per minute per tenant ID.

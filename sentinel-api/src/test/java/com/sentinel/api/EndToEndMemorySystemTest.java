@@ -8,8 +8,10 @@ import com.sentinel.api.service.ConversationalMemoryService;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -89,11 +91,11 @@ class EndToEndMemorySystemTest {
     	 */
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379).toString());
-//        /* Note: We are NOT mocking Ollama. We are letting Spring 
-//         * connect to your real local Ollama container!
-//         */
-//        registry.add("spring.ai.ollama.base-url", () -> "http://localhost:11434");
     }
+    
+    // Add this! This prevents Spring from trying to connect to a real Postgres DB
+    @MockBean
+    private VectorStore vectorStore;
 
     @Autowired
     private AnalysisService analysisService;

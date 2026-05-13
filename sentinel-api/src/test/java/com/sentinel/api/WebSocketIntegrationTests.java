@@ -4,11 +4,12 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
 import org.springframework.web.reactive.socket.client.WebSocketClient;
 
@@ -16,9 +17,6 @@ import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
-//import org.testcontainers.junit.jupiter.Testcontainers;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -30,7 +28,6 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 import reactor.core.Disposable;
-import reactor.core.publisher.Flux;
 
 import java.net.URI;
 import java.time.Duration;
@@ -120,6 +117,28 @@ class WebSocketIntegrationTests {
     		DockerImageName.parse("redis:7-alpine"))
         .withExposedPorts(6379)
         .withReuse(true);
+    
+    /*
+     * Day-9: This prevents Spring from trying to connect to a real Postgres DB.
+     * 
+     * <pre>
+     * Because application.yml now mandates a Postgres connection, every single 
+     * test file annotated with @SpringBootTest (like your WebSocketIntegrationTests 
+     * or the default SentinelApiApplicationTests generated on Day 1) will suddenly 
+     * crash because they don't have the Postgres Testcontainer wired into them.
+
+	   The Fix for other Integration Tests:
+	   You don't need to spin up a heavy Postgres database for a test that is only 
+	   checking WebSockets. You just need to tell Spring Boot to mock the database 
+	   so the Application Context can load.
+
+	   Open any failing test class (like WebSocketIntegrationTests.java or 
+	   SentinelApiApplicationTests.java) and add a mock for the VectorStore bean 
+	   to satisfy the auto-configuration.
+     * </pre>
+     */
+    @MockBean
+    private VectorStore vectorStore;
     
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
