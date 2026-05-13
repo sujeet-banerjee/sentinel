@@ -1,9 +1,12 @@
 package com.sentinel.api;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /*
@@ -22,6 +25,20 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 		webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 class SentinelApiApplicationTests {
+	
+	/**
+     * @since Day-9. Required due to the introduction of application.yml 
+     * (resolving application.properties).
+     */
+    @MockBean
+    private VectorStore vectorStore;
+    
+    /**
+     * @since Day-9. Required due to the introduction of application.yml 
+     * (resolving application.properties).
+     */
+    @MockBean 
+    private ReactiveStringRedisTemplate redisTemplate;
 	
 	@Autowired
 	private WebTestClient webTestClient;

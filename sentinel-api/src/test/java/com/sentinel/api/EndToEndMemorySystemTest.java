@@ -93,7 +93,10 @@ class EndToEndMemorySystemTest {
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379).toString());
     }
     
-    // Add this! This prevents Spring from trying to connect to a real Postgres DB
+    /**
+     *  Add this! This prevents Spring from trying to connect to a real Postgres DB.
+     *  @since Day-9
+     */
     @MockBean
     private VectorStore vectorStore;
 

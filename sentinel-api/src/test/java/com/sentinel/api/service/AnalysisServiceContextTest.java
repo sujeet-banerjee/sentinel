@@ -115,7 +115,7 @@ class AnalysisServiceContextTest {
                 .assertNext(chunk -> {assert chunk.content() != null;})
                 .verifyComplete();
         
-     // 5. THE AUTOMATED ASSERTION (No eyeballs required)
+        // 5. THE AUTOMATED ASSERTION (No eyeballs required)
         // This will instantly fail the GitHub Action if the wrong string is passed down!
         Mockito.verify(memoryService).getHistory(
         		Mockito.eq("UNKNOWN_TENANT"), 

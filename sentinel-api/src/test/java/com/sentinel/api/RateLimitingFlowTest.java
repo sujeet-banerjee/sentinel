@@ -7,6 +7,7 @@ import com.sentinel.api.service.AnalysisService;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -60,6 +61,13 @@ class RateLimitingFlowTest {
     // 2. MOCK the expensive AI service. We only care about the gateway logic!
     @MockBean
     private AnalysisService analysisService;
+    
+    /**
+     * @since Day-9. Required due to the introduction of application.yml 
+     * (resolving application.properties).
+     */
+    @MockBean
+    private VectorStore vectorStore;
 
     /**
      * POSITIVE & NEGATIVE TEST:

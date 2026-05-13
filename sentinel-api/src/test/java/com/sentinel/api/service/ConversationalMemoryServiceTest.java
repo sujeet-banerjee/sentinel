@@ -3,8 +3,11 @@ package com.sentinel.api.service;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -29,7 +32,8 @@ class ConversationalMemoryServiceTest {
 
     // Spin up a fresh, real Redis instance for this test suite
     @Container
-    static final GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+    static final GenericContainer<?> redis = new GenericContainer<>(
+    		DockerImageName.parse("redis:7-alpine"))
             .withExposedPorts(6379);
 
     @DynamicPropertySource
@@ -39,7 +43,14 @@ class ConversationalMemoryServiceTest {
         // Mock the LLM url so Spring doesn't try to connect to a real Ollama instance during context load
         registry.add("spring.ai.ollama.base-url", () -> "http://localhost:9999");
     }
-
+    
+    /**
+     * @since Day-9. Required due to the introduction of application.yml 
+     * (resolving application.properties).
+     */
+    @MockBean
+    private VectorStore vectorStore;
+    
     @Autowired
     private ConversationalMemoryService memoryService;
 
