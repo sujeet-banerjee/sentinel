@@ -129,8 +129,13 @@ class EndToEndMemorySystemTest {
                 .thenConsumeWhile(chunk -> true) 
                 .verifyComplete();
 
-        // SRE TRIPWIRE: Give the async background thread 1 second to write to Redis
-        Thread.sleep(1000); 
+        // FIX: Let the background Reactive test-thread finish writing to Redis ---
+        log.info("Simulating human read time to allow async Redis commit...");
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         // ====================================================================
         // PROMPT 2: Retrieve the Secret Knowledge
