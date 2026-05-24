@@ -5,6 +5,7 @@ public record AnalysisContext(
     String sessionId,
     ReviewRequest request,
     String history,
+    String ragContext,
     String finalPrompt
 ) {
     /**
@@ -14,7 +15,7 @@ public record AnalysisContext(
      */
     public AnalysisContext withHistory(String history) {
         return new AnalysisContext(this.tenantId, this.sessionId,
-        		this.request, history, this.finalPrompt);
+        		this.request, history, this.ragContext, this.finalPrompt);
     }
 
     /** 
@@ -24,6 +25,16 @@ public record AnalysisContext(
      */
     public AnalysisContext withPrompt(String prompt) {
         return new AnalysisContext(this.tenantId, this.sessionId,
-        		this.request, this.history, prompt);
+        		this.request, this.history, this.ragContext, prompt);
+    }
+    
+    /**
+     * 
+     * @param ragContext
+     * @return
+     */
+    public AnalysisContext withRagContext(String ragContext) {
+        return new AnalysisContext(this.tenantId, this.sessionId,
+        		this.request, this.history, ragContext, this.finalPrompt);
     }
 }

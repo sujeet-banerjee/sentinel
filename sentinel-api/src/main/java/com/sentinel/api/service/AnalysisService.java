@@ -1,21 +1,25 @@
 package com.sentinel.api.service;
 
+import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.ollama.OllamaChatModel;
-import org.springframework.data.util.Pair;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
 import com.sentinel.api.model.AnalysisContext;
 import com.sentinel.api.model.ReviewRequest;
 import com.sentinel.api.model.SentinelChunk;
-import com.sentinel.api.model.SentinelChunk.ChunkType;
 import com.sentinel.api.model.TokenProcessingState;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * The core domain service orchestrating the Generative AI architectural review process.
@@ -44,35 +48,42 @@ public class AnalysisService {
 	private static final Logger log = LoggerFactory.getLogger(
 			AnalysisService.class);
 	
-	/**
+	/*
 	 * Auto injected through contructor injection
 	 */
 	private final OllamaChatModel chatModel;
 	private final ConversationalMemoryService memoryService;
+	private final VectorStore vectorStore;
 	
 	private static final String SYST_PROMPT_TEMPLATE = 
-			"You are Sentinel, an expert Software Architect. "
-			//
-			+ "Critique the following architecture focusing on %s. "
-			+ "1. Use standard Markdown for text. "
-			+ "2. If illustrating a flow or structure, "
-			+ "you MUST use a Mermaid.js block: ```mermaid [code] ```. "
-			+ "3. Always begin with 'SENTINEL ANALYSIS STARTING...'. "
-			+ "4. Always conclude with the exact string: 'ANALYSIS COMPLETE'. \n\n "
-			+ "%s \n\n" // Memory
-			+ "CURRENT REQUEST: %s";
+            "You are Sentinel, an expert Enterprise Architecture AI. "
+            + "Critique the following architecture focusing on %s. "
+            + "1. Use standard Markdown for text. "
+            + "2. If illustrating a flow or structure, "
+            + "you MUST use a Mermaid.js block: ```mermaid [code] ```. "
+            + "3. Always begin with 'SENTINEL ANALYSIS STARTING...'. "
+            + "4. Always conclude with the exact string: 'ANALYSIS COMPLETE'. \n\n"
+            + "=== CORPORATE GUIDELINES (Enforce these strictly) ===\n"
+            + "%s \n\n" // <--- RAG CONTEXT INJECTION
+            + "=== CONVERSATION HISTORY ===\n"
+            + "%s \n\n" // <--- HISTORY INJECTION
+            + "CURRENT REQUEST: %s";
 
-	private static final int MAX_WINDOW_SIZE = 64;
-	
+	private static final String ALT_PROMPT = "No specific corporate guidelines "
+			+ "found for this topic. Rely on industry best practices.";
+
 	/**
 	 * 
 	 * @param chatModel
 	 * @param memoryService
+	 * @param vectorStore
 	 */
 	public AnalysisService(OllamaChatModel chatModel, 
-			ConversationalMemoryService memoryService) {
+			ConversationalMemoryService memoryService,
+			VectorStore vectorStore) {
         this.chatModel = chatModel;
 		this.memoryService = memoryService;
+		this.vectorStore = vectorStore;
     }
 
 	
@@ -91,16 +102,19 @@ public class AnalysisService {
          */
         return Mono.deferContextual(ctx -> initializeContext(ctx, request))
                 .flatMap(this::enrichWithHistory)
+                .flatMap(this::enrichWithVectorData)
                 .map(this::buildSystemPrompt)
                 .flatMapMany(this::executeInferenceStream);
     }
     
     // --- PIPELINE COMPONENTS --- //
 
-    private Mono<AnalysisContext> initializeContext(reactor.util.context.ContextView ctx, ReviewRequest request) {
+    private Mono<AnalysisContext> initializeContext(reactor.util.context.ContextView ctx, 
+    		ReviewRequest request) {
         String tenantId = ctx.getOrDefault("TENANT_ID", "UNKNOWN_TENANT");
         String sessionId = ctx.getOrDefault("SESSION_ID", "UNKNOWN_SESSION");
-        return Mono.just(new AnalysisContext(tenantId, sessionId, request, null, null));
+        return Mono.just(new AnalysisContext(tenantId, 
+        		sessionId, request, null, null, null));
     }
 
     private Mono<AnalysisContext> enrichWithHistory(AnalysisContext context) {
@@ -109,15 +123,28 @@ public class AnalysisService {
     }
 
     private AnalysisContext buildSystemPrompt(AnalysisContext context) {
+    	/*
+    	 *  Handle case where Postgres returns nothing
+    	 */
+        String safeRagContext = context.ragContext() != null && 
+        		!context.ragContext().isEmpty()  
+        		? context.ragContext() 
+                : ALT_PROMPT;
         String prompt = String.format(
                 SYST_PROMPT_TEMPLATE, 
-                context.request().focusArea(), 
-                context.history(), 
+                context.request().focusArea(),
+                // 1. Inject RAG
+                safeRagContext,
+                // 2. Inject History
+                context.history(),
+                // 3. Inject User Request
                 context.request().content()
         );
         
-        log.info("[TENANT: {} | SESSION: {}] Commencing Review. History size: {} chars", 
-                context.tenantId(), context.sessionId(), context.history().length());
+        log.info("[TENANT: {} | SESSION: {}] Commencing RAG Review. "
+        		+ "History size: {}, Vector Context size: {}", 
+                context.tenantId(), context.sessionId(), 
+                context.history().length(), safeRagContext.length());
                 
         return context.withPrompt(prompt);
     }
@@ -144,5 +171,41 @@ public class AnalysisService {
                 context.request().content(), 
                 capturedMemory
         ).subscribe(); // Fire and forget
+    }
+    
+    /**
+     * THE NON-BLOCKING BRIDGE: 
+     * Offloads the blocking JDBC vector search to a dedicated background thread pool.
+     */
+    private Mono<AnalysisContext> enrichWithVectorData(AnalysisContext context) {
+        return Mono.fromCallable(() -> {
+            log.debug("[TENANT: {}] Querying PostgreSQL for semantic context...", 
+            		context.tenantId());
+            
+            // The actual Semantic Search against PGVector
+            // TODO Add .filterExpression("tenant_id == '" + context.tenantId() + "'")
+            SearchRequest request = SearchRequest.builder()
+                    .query(context.request().content())
+                    // TODO top-k should be configurable
+                    .topK(2)
+                    .build();
+
+            return vectorStore.similaritySearch(request).stream()
+                    .map(Document::getText)
+                    .collect(Collectors.joining("\n\n---\n\n"));
+        })
+        /*
+         * Sentinel is built on Spring WebFlux (Reactive/Asynchronous). 
+         * However, querying PostgreSQL via VectorStore is a blocking JDBC operation. 
+         * If you execute a blocking database call on a reactive Netty thread, 
+         * the entire server will instantly crash with a BlockHound or thread starvation
+         * exception.
+         * 
+         * FIX: To fix this, we must wrap the Postgres query in Mono.fromCallable() 
+         * and assign it to a dedicated background thread pool using 
+         * Schedulers.boundedElastic().
+         */
+        .subscribeOn(Schedulers.boundedElastic()) // <--- CRITICAL FOR WEBFLUX
+        .map(context::withRagContext);
     }
 }

@@ -13,6 +13,8 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.ollama.OllamaChatModel;
+import org.springframework.ai.vectorstore.VectorStore;
+
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -29,6 +31,9 @@ class AnalysisServiceContextTest {
 
     @Mock
     private OllamaChatModel chatModel;
+    
+    @Mock
+    private VectorStore vectoreStore;
     
     
     @Test
@@ -51,7 +56,7 @@ class AnalysisServiceContextTest {
 
         // 3. MANUAL WIRING
         AnalysisService analysisService = new AnalysisService(
-        		chatModel, memoryService);
+        		chatModel, memoryService, vectoreStore);
 
         // 4. THE TEST EXECUTION
         ReviewRequest request = new ReviewRequest("Test", "Security", 1);
@@ -104,7 +109,7 @@ class AnalysisServiceContextTest {
 
         // 3. MANUAL WIRING
         AnalysisService analysisService = new AnalysisService(
-        		chatModel, memoryService);
+        		chatModel, memoryService, vectoreStore);
 
         // 4. THE TEST EXECUTION (No context provided)
         ReviewRequest request = new ReviewRequest("Test", "Security", 1);

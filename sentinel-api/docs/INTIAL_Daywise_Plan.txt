@@ -1,0 +1,98 @@
+ROAD MAP
+---------
+
+### Goals
+The "Senior Architect" Signal: You aren't just a coder; your recent work on the Sentinel project—specifically using Spring WebFlux, Project Reactor, and WebSockets—shows you understand high-concurrency, reactive systems. Conversion's backend (Golang/Kafka) requires exactly this mindset: managing high-throughput data streams without blocking.
+
+Product-Minded Engineering: Conversion explicitly looks for "Pragmatic Optimizers" and "Engineers with a Builder's Mindset." Your focus on TDD (Test Driven Development) and clean project structure (like the monorepo we set up) aligns with their "Push Fast, Iterate Faster" culture.
+
+Real-Time Capabilities: Their platform relies on real-time CRM syncs. Your current work building bi-directional WebSocket highways is a direct technical parallel to how they likely handle real-time event streaming between their platform and their customers' data sources.
+
+
+### High Level Deployment Plan
+Backend: Java 21 + Spring Boot 3.4 (WebFlux/Reactive).
+
+AI Engine: Groq (Llama 3.3 70B) via Spring AI (OpenAI-compatible starter).
+
+Memory/State: Serverless Redis (Upstash) for session state and rate-limiting.
+
+Frontend: Next.js 15 + Shadcn/ui + Mermaid.js (Vercel-hosted).
+
+Persistence: Supabase/Neon (PostgreSQL + PGVector) for hybrid search patterns.
+
+DevOps/Infra: GitHub Actions (CI/CD) + Railway (Managed Pro-Tier Hosting).
+
+### Infrastructure Decision Matrix
+Laptop: Local dev, IDE, and Maven builds.
+
+GitHub: Source control and GitHub Actions for CI/CD.
+
+Railway ($10-$15 budget): Permanent home for the Sentinel Engine (Backend).
+
+Vercel: Permanent home for the Dashboard (Frontend).
+
+Upstash: Serverless Redis for Memory/Rate Limiting.
+
+
+### Original Day-wise execution plan (can get drifted)
+
+Low-Level Execution Roadmap (28 Days)
+Week 1: The Reactive Foundation
+Day 1: Initialize Spring Boot 3.4 WebFlux project (Java 21).
+
+Day 2: Configure WebSocket standard for bi-directional streaming.
+
+Day 3: Build Mermaid.js raw string validator service.
+
+Day 4: Write multi-stage, distroless Dockerfile for production.
+
+Day 5: Develop the ReviewService using non-blocking Flux.
+
+Day 6: Initial local deployment with docker-compose.
+
+Day 7: Reliability Audit: Zero .block() calls in the code.
+
+Week 2: Governance & Persistence
+Day 8: Connect Spring Data Reactive Redis (Upstash).
+
+Day 9: Implement Bucket4j-based Token Bucket rate limiting.
+
+Day 10: Sync rate-limits across distributed instances via Redis.
+
+Day 11: Build UUID-based guest session tracking.
+
+Day 12: Configure backpressure logic for heavy architectural data.
+
+Day 13: Implement global Reactive Error Handlers.
+
+Day 14: Conduct local load test (k6) to verify high concurrency.
+
+Week 3: The Agentic Critic (The Brain)
+Day 15: Connect Spring AI to Groq (Llama 3.3).
+
+Day 16: Persona Prompting: Architect, Security, and Cost lenses.
+
+Day 17: Implement word-by-word streaming responses via WebSockets.
+
+Day 18: Tool Calling: Build a tool to fetch real-world cloud prices.
+
+Day 19: Implement Conversation Buffer Memory in Redis.
+
+Day 20: Mermaid-to-Insight logic (Mapping AI text to diagram nodes).
+
+Day 21: Agentic Loop verification: Can the AI correct its own review?
+
+Week 4: The Professional Launch
+Day 22: Scaffold Next.js dashboard with Mermaid renderer.
+
+Day 23: Apply Shadcn/ui Dark Mode "Engineering" theme.
+
+Day 24: Real-time UI updates with highlighted diagram nodes.
+
+Day 25: Add Micrometer/Prometheus for latency tracking.
+
+Day 26: Railway Pro-Tier production deployment.
+
+Day 27: Final MLOps README and GitHub documentation.
+
+Day 28: Public Launch & Portfolio Video Recording.

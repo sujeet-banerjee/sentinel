@@ -124,7 +124,7 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
                      * the main outbound stream.
                      */
                     // --- DAY 7: RATE LIMITER INTERCEPTION ---
-                    .flatMap(request -> rateLimiterService.isAllowed(tenantId)
+                    .flatMap(request -> rateLimiterService.isAllowed(tenantId, session.getId())
                         .flatMapMany(rateLimitResult -> {
                         	boolean isAllowed = rateLimitResult.getFirst();
                             long waitSeconds = rateLimitResult.getSecond();

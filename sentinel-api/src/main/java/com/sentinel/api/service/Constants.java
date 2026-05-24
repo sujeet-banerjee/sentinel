@@ -32,5 +32,12 @@ public interface Constants {
 	 *  Keep the last 10 messages (5 user prompts, 5 AI responses)
 	 */
 	int MAX_HISTORY_MESSAGES = 10;
+	/*
+	 *  In a production app, this would be loaded dynamically from a DB per tenant.
+	 *  We are hardcoding a strict limit of 5 requests per minute for this demonstration.
+	 *  
+	 *  TODO move to DB (config)
+	 */
+	int MAX_REQUESTS_PER_MINUTE = 5;
 	
 }

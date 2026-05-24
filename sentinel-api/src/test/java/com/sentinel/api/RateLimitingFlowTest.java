@@ -134,7 +134,8 @@ class RateLimitingFlowTest {
             Mono<Void> receive = session.receive()
                     .map(msg -> {
                         try {
-                            return objectMapper.readValue(msg.getPayloadAsText(), SentinelChunk.class);
+                            return objectMapper.readValue(msg.getPayloadAsText(), 
+                            		SentinelChunk.class);
                         } catch (Exception e) {
                             return new SentinelChunk("Error", SentinelChunk.ChunkType.TEXT, 0);
                         }
@@ -150,7 +151,7 @@ class RateLimitingFlowTest {
         // Assert that the Handler short-circuited the pipeline and emitted the Rejection Chunk
         StepVerifier.create(rejectionSink.asMono())
             .assertNext(chunk -> {
-                log.info("Received Expected Rejection: {}", chunk.content());
+                log.info("Received ChinkType={}; chunkContent={}", chunk.content());
                 assert chunk.type() == SentinelChunk.ChunkType.RATE_LIMIT_EXCEEDED;
             })
             .verifyComplete();

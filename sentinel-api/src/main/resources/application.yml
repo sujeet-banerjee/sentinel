@@ -29,3 +29,8 @@ spring:
         distance-type: COSINE_DISTANCE
         dimensions: 768
         initialize-schema: true
+
+sentinel:
+  ratelimit:
+    strategy: bucket  # Change to 'rigid' to use the old implementation
+    #strategy: rigid  # Change to 'bucket' to use the new implementation
