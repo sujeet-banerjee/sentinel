@@ -2,5 +2,5 @@
     <include resource="org/springframework/boot/logging/logback/base.xml"/>
     <logger name="com.sentinel.api" level="DEBUG"/>
     <logger name="com.sentinel.api.service" level="DEBUG"/>
-    <logger name="reactor.netty" level="DEBUG"/>
+    <logger name="reactor.netty" level="INFO"/>
 </configuration>

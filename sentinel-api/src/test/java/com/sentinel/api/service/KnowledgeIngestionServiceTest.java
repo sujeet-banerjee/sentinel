@@ -71,15 +71,15 @@ class KnowledgeIngestionServiceTest {
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
-    	log.info("Test Ollama Container started: {} --> ",
+    	log.info("Test Ollama Container started: {} --> {}",
     			ollama.getContainerId(),
     			ollama.getContainerName());
     	
-    	log.info("Test Postgres Container started (Already): {} --> ", 
+    	log.info("Test Postgres Container started (Already): {} --> {}", 
     			postgres.getContainerId(), 
     			postgres.getContainerName());
     	
-    	log.info("Test Redis Container started (Already): {} --> ", 
+    	log.info("Test Redis Container started (Already): {} --> {}", 
     			redis.getContainerId(), 
     			redis.getContainerName());
     	
