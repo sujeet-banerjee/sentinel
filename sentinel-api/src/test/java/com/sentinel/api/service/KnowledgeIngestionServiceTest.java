@@ -37,8 +37,15 @@ import org.springframework.ai.vectorstore.SearchRequest;
 class KnowledgeIngestionServiceTest {
 	private static final Logger log = LoggerFactory.getLogger(
 			KnowledgeIngestionServiceTest.class);
+	
+	@SuppressWarnings("resource")
+	@Container
+    static final GenericContainer<?> redis = new GenericContainer<>(
+    		DockerImageName.parse("redis:7-alpine"))
+            .withExposedPorts(6379);
 
-    @Container
+    @SuppressWarnings("resource")
+	@Container
     static final GenericContainer<?> postgres = new GenericContainer<>(
     		DockerImageName.parse("pgvector/pgvector:pg16"))
             .withEnv("POSTGRES_USER", "sentinel")
@@ -64,13 +71,17 @@ class KnowledgeIngestionServiceTest {
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
-    	log.info("Test Ollama Container started: {} --> ",
+    	log.info("Test Ollama Container started: {} --> {}",
     			ollama.getContainerId(),
     			ollama.getContainerName());
     	
-    	log.info("Test Postgres Container started (Already): {} --> ", 
+    	log.info("Test Postgres Container started (Already): {} --> {}", 
     			postgres.getContainerId(), 
     			postgres.getContainerName());
+    	
+    	log.info("Test Redis Container started (Already): {} --> {}", 
+    			redis.getContainerId(), 
+    			redis.getContainerName());
     	
     	/*
     	 * WE DON'T NEED .start() on the containers:
@@ -88,6 +99,10 @@ class KnowledgeIngestionServiceTest {
     	 * (meaning it is safe to call multiple times)
     	 */
     	
+    	// Redis
+    	registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379).toString());
+    	
     	// Postgres mapping
         registry.add("spring.datasource.url", () -> 
         	"jdbc:postgresql://" + postgres.getHost() 
@@ -98,6 +113,8 @@ class KnowledgeIngestionServiceTest {
         	+ ":" + ollama.getMappedPort(11434));
         registry.add("spring.ai.ollama.chat.options.timeout", () -> "30m");
         registry.add("spring.codec.max-in-memory-size", () -> "10MB");
+        
+        
     }
 
     @Autowired

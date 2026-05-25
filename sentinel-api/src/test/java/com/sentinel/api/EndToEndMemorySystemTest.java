@@ -4,6 +4,7 @@ import com.sentinel.api.model.ReviewRequest;
 import com.sentinel.api.model.SentinelChunk;
 import com.sentinel.api.service.AnalysisService;
 import com.sentinel.api.service.ConversationalMemoryService;
+import com.sentinel.api.service.RateLimiterService;
 
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -12,6 +13,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.data.util.Pair;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -20,6 +22,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 import reactor.util.context.Context;
 
@@ -105,6 +108,9 @@ class EndToEndMemorySystemTest {
     
     @Autowired
     private ConversationalMemoryService memoryService;
+    
+    @Autowired
+    private RateLimiterService rateLimiterService;
 
     @Test
     void llmShouldRememberContextFromPreviousInteraction() throws InterruptedException {
@@ -120,7 +126,10 @@ class EndToEndMemorySystemTest {
                 1
         );
 
-        log.info("--- SENDING PROMPT 1 ---");
+        log.info("--- [[SENDING PROMPT 1]] ---");
+        log.info(request1.content());
+        log.info("--- [/SENDING PROMPT 1/] ---");
+        
         Flux<SentinelChunk> response1 = analysisService.analyze(request1)
                 .contextWrite(Context.of("TENANT_ID", tenantId, "SESSION_ID", sessionId));
 
@@ -128,9 +137,14 @@ class EndToEndMemorySystemTest {
         StepVerifier.create(response1)
                 .thenConsumeWhile(chunk -> true) 
                 .verifyComplete();
+        
+        StepVerifier.create(memoryService.getHistory(tenantId, sessionId))
+		        .assertNext(history -> {
+		            log.info("Conv. History So far:\n{}\n\n", history);
+		        })
+		        .verifyComplete();
 
-        // FIX: Let the background Reactive test-thread finish writing to Redis ---
-        log.info("Simulating human read time to allow async Redis commit...");
+        log.info("Simulating 3 sec delay time to allow async Redis commit...");
         try {
             Thread.sleep(3000);
         } catch (InterruptedException e) {
@@ -146,13 +160,14 @@ class EndToEndMemorySystemTest {
                 1
         );
 
-        log.info("--- SENDING PROMPT 2 ---");
         Flux<SentinelChunk> response2 = analysisService.analyze(request2)
                 .contextWrite(Context.of("TENANT_ID", tenantId, "SESSION_ID", sessionId));
+        log.info("--- [[SENDING PROMPT 2]] ---");
+        log.info(request2.content());
+        log.info("--- [/SENDING PROMPT 2/] ---");
 
         // Collect all chunks of the second response into a single string
         final StringBuilder finalAnswer = new StringBuilder();
-        
         StepVerifier.create(response2)
                 .thenConsumeWhile(chunk -> {
                 	if (chunk.content() != null) 
@@ -160,35 +175,53 @@ class EndToEndMemorySystemTest {
                 	return true;
                 	})
                 .verifyComplete();
-
         log.info("LLM FINAL ANSWER: {}", finalAnswer.toString());
+        
+        rateLimiterService.isAllowed(tenantId, sessionId)
+	        .doOnNext(pair -> {
+	            log.info("[RL={}] RateLimit details -> First: {}, Second: {}", 
+	            		 rateLimiterService.getClass().getSimpleName(),
+	                     pair.getFirst(), 
+	                     pair.getSecond());
+	        })
+	        .subscribe();
+        
+        log.info("Simulating another 3 sec delay time to allow async Redis commit...");
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         // ====================================================================
         // THE ASSERTION
         // ====================================================================
+        
+        /*
+         * Redis memory verification.
+         */
+        log.info("--- VERIFYING PHYSICAL REDIS MEMORY FOR SESSION: {} ---", sessionId);
+        StepVerifier.create(memoryService.getHistory(tenantId, sessionId))
+                .assertNext(history -> {
+                	log.info("Full Conv. History:\n{}", history);
+                	
+                    // 1. Verify Prompt/Response 1 is in the database
+                    assertThat(history).contains(
+                    		"The secret codename for this project is 'PROJECT_OMEGA'");
+                    
+                    // 2. Verify Prompt/Response 2 is in the database
+                    assertThat(history).contains(
+                    		"What is the secret codename for the project I am designing?");
+                    assertThat(history).containsIgnoringCase("PROJECT_OMEGA");
+                })
+                .verifyComplete();
+        
+        /*
+         * Final LLM response verification
+         */
         assertThat(finalAnswer.toString())
                 .containsIgnoringCase("PROJECT_OMEGA")
                 .as("The LLM completely forgot the context from Prompt 1!");
         
-        // ====================================================================
-        // THE REDIS DATABASE VERIFICATION
-        // ====================================================================
-        // SRE Tripwire: Give the second prompt's async background thread time to write
-        Thread.sleep(1000); 
-
-        log.info("--- VERIFYING PHYSICAL REDIS MEMORY FOR SESSION: {} ---", sessionId);
-        
-        StepVerifier.create(memoryService.getHistory(tenantId, sessionId))
-                .assertNext(history -> {
-                    // 1. Verify Prompt/Response 1 is in the database
-                    assertThat(history).contains("The secret codename for this project is 'PROJECT_OMEGA'");
-                    
-                    // 2. Verify Prompt/Response 2 is in the database
-                    assertThat(history).contains("What is the secret codename for the project I am designing?");
-                    assertThat(history).containsIgnoringCase("PROJECT_OMEGA");
-                    
-                    log.info("REDIS VERIFICATION SUCCESSFUL. Full History Retained:\n{}", history);
-                })
-                .verifyComplete();
     }
 }
