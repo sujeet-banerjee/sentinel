@@ -1,4 +1,4 @@
-name: Build and Push Ollama Engine
+name: Only for ref - no build
 
 on:
   push:
