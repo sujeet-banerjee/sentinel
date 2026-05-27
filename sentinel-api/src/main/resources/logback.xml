@@ -1,0 +1,6 @@
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+    <logger name="com.sentinel.api" level="INFO"/>
+    <logger name="com.sentinel.api.service" level="INFO"/>
+    <logger name="reactor.netty" level="INFO"/>
+</configuration>

@@ -8,6 +8,7 @@ ENV OLLAMA_HOST=0.0.0.0
 RUN ollama serve & \
     sleep 5 && \
     ollama pull llama3 && \
+	ollama pull nomic-embed-text && \
     pkill ollama
 
 EXPOSE 11434

@@ -1,0 +1,22 @@
+# Sentinel Enterprise Architecture Guidelines
+Document Version: 1.4
+Effective Date: Q3 2026
+Domain: Backend Infrastructure & Data Governance
+
+## 1. Multitenancy and Data Isolation
+All microservices and API layers within the Sentinel ecosystem must enforce strict logical multitenancy. 
+- The standard header for propagating tenant context across the network boundary is `X-Sentinel-Tenant-ID`.
+- Under no circumstances should tenant data be comingled in persistent storage without a partition key. 
+- In PostgreSQL (pgvector), all semantic search queries must append a metadata filter ensuring `tenant_id` exactly matches the incoming request context.
+
+## 2. Reactive I/O and Threading Mandate
+Sentinel is built on Project Reactor and Spring WebFlux. The Netty event loop must never be blocked.
+- Any legacy JDBC calls, standard java.io operations, or heavy CPU-bound tasks (like cryptographic hashing or parsing large PDF files) must be explicitly offloaded.
+- Developers must use `Mono.fromCallable()` combined with `.subscribeOn(Schedulers.boundedElastic())` to isolate blocking calls.
+- Failure to wrap blocking calls will result in thread starvation and will be automatically flagged by BlockHound during the CI/CD pipeline integration.
+
+## 3. Distributed Rate Limiting Policy
+To protect our Edge deployments and downstream LLM providers (e.g., Groq), global rate limiting is mandatory.
+- We utilize the Token Bucket algorithm, implemented via Bucket4j.
+- State must be synchronized across distributed nodes using Fly.io's native/managed Redis clusters.
+- Rate limiting keys must be partitioned strictly by Tenant ID to avoid "Split-Brain" quota allocation where a tenant might accidentally bypass their quota due to mismatched session IDs.

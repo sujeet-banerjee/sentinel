@@ -1,4 +1,4 @@
-name: Bake AI Image
+name: Build and Push Ollama Engine
 
 on:
   workflow_dispatch: # Manual trigger
@@ -6,12 +6,20 @@ on:
     paths:
       - 'Ollama.Dockerfile' # Only rebuild if the recipe changes
 
+env:
+  REGISTRY: ghcr.io
+  # Use lowercase explicitly or rely on github repo properties if safe. 
+  # Note: github.repository_owner might contain uppercase depending on your username, 
+  # so Docker metadata action prefers it lowercased, but GHCR usually handles the token.
+  IMAGE_NAME: ${{ github.repository_owner }}/sentinel/sentinel-ollama-llama3
+
 jobs:
   bake:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      id-token: write # Required for generating provenance (Supply Chain Security)
 
     steps:
       - name: Checkout
@@ -20,18 +28,35 @@ jobs:
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- NEW METADATA STEP ---
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Always output 'latest'
+            type=raw,value=latest
+            # Generates a tag with the short Git SHA (e.g., sha-ad1f5a9)
+            type=sha,format=short
+            # Generates a timestamp tag (great for tracking manual workflow_dispatch runs!)
+            type=raw,value={{date 'YYYYMMDD-HHmmss'}}
 
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
-          #file: ./Ollama.Dockerfile
           file: sentinel/sentinel-api/src/test/resources/Ollama.Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/sentinel/sentinel-ollama-llama3:latest
-          # This magic line uses GitHub's native cache for Docker layers
+          # Bind the dynamically generated tags and labels from the step above
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Attach cryptographic provenance (The DevSecOps flex)
+          provenance: true
+          # Native GitHub Action layer caching (Kept intact from your original)
           cache-from: type=gha
           cache-to: type=gha,mode=max

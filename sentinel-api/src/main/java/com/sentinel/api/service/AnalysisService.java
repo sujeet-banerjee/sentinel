@@ -1,5 +1,6 @@
 package com.sentinel.api.service;
 
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -84,7 +85,25 @@ public class AnalysisService {
         this.chatModel = chatModel;
 		this.memoryService = memoryService;
 		this.vectorStore = vectorStore;
+		
+		checkServiceLoaded("chatModel", this.chatModel);
+		checkServiceLoaded("memoryService", this.memoryService);
+		checkServiceLoaded("vectorStore", this.vectorStore);
     }
+
+
+	/**
+	 * Sanity check!
+	 * @param name
+	 * @param obj
+	 */
+	private void checkServiceLoaded(String name, Object obj) {
+		try {
+			log.debug("Loaded {}: {}", name, obj.getClass().getSimpleName());
+		} catch (Exception e) {
+			log.error("NOT LOADED: {}", name);
+		}
+	}
 
 	
 	/**
@@ -109,15 +128,19 @@ public class AnalysisService {
     
     // --- PIPELINE COMPONENTS --- //
 
-    private Mono<AnalysisContext> initializeContext(reactor.util.context.ContextView ctx, 
+    private Mono<AnalysisContext> initializeContext(
+    		reactor.util.context.ContextView ctx, 
     		ReviewRequest request) {
         String tenantId = ctx.getOrDefault("TENANT_ID", "UNKNOWN_TENANT");
         String sessionId = ctx.getOrDefault("SESSION_ID", "UNKNOWN_SESSION");
+        log.debug("[TENANT: {}] Initializing Context...", tenantId);
         return Mono.just(new AnalysisContext(tenantId, 
         		sessionId, request, null, null, null));
     }
 
     private Mono<AnalysisContext> enrichWithHistory(AnalysisContext context) {
+    	log.debug("[TENANT: {}] Fetching Conversational History...", 
+    			context.tenantId());
         return memoryService.getHistory(context.tenantId(), context.sessionId())
                 .map(context::withHistory);
     }
@@ -145,11 +168,15 @@ public class AnalysisService {
         		+ "History size: {}, Vector Context size: {}", 
                 context.tenantId(), context.sessionId(), 
                 context.history().length(), safeRagContext.length());
+        
+        log.debug("[TENANT: {}] SystemMessage: {}", context.tenantId(), prompt);
                 
         return context.withPrompt(prompt);
     }
 
     private Flux<SentinelChunk> executeInferenceStream(AnalysisContext context) {
+    	log.debug("[TENANT: {}] Initiating inferencing...", 
+    			context.tenantId());
         return Flux.defer(() -> {
             // Instantiate state safely inside the defer block for thread isolation
             TokenProcessingState state = new TokenProcessingState();
@@ -159,12 +186,14 @@ public class AnalysisService {
                     .map(result -> result.getOutput().getText())
                     .filter(text -> text != null && !text.isEmpty())
                     .map(state::processToken)
-                    .doOnComplete(() -> commitMemoryAsync(context, state.getCapturedMemory()));
+                    .doOnComplete(() -> commitMemoryAsync(context, 
+                    		state.getCapturedMemory()));
         });
     }
 
     private void commitMemoryAsync(AnalysisContext context, String capturedMemory) {
-        log.debug("[TENANT: {}] Stream complete. Committing to memory.", context.tenantId());
+        log.debug("[TENANT: {}] Stream complete. Committing to memory.", 
+        		context.tenantId());
         memoryService.saveInteraction(
                 context.tenantId(), 
                 context.sessionId(), 
@@ -178,10 +207,12 @@ public class AnalysisService {
      * Offloads the blocking JDBC vector search to a dedicated background thread pool.
      */
     private Mono<AnalysisContext> enrichWithVectorData(AnalysisContext context) {
+    	log.debug("[TENANT: {}] Querying vector-store for semantic context...", 
+        		context.tenantId());
         return Mono.fromCallable(() -> {
-            log.debug("[TENANT: {}] Querying PostgreSQL for semantic context...", 
-            		context.tenantId());
             
+        	log.debug("[TENANT: {}] Building VS search request... ", 
+            		context.tenantId());
             // The actual Semantic Search against PGVector
             // TODO Add .filterExpression("tenant_id == '" + context.tenantId() + "'")
             SearchRequest request = SearchRequest.builder()
@@ -189,6 +220,9 @@ public class AnalysisService {
                     // TODO top-k should be configurable
                     .topK(2)
                     .build();
+            
+            log.debug("[TENANT: {}] Search req={} ",  context.tenantId(),
+            		request);
 
             return vectorStore.similaritySearch(request).stream()
                     .map(Document::getText)
@@ -206,6 +240,7 @@ public class AnalysisService {
          * Schedulers.boundedElastic().
          */
         .subscribeOn(Schedulers.boundedElastic()) // <--- CRITICAL FOR WEBFLUX
+        .log("VECTOR STORE", Level.INFO)
         .map(context::withRagContext);
     }
 }

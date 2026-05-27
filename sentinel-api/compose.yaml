@@ -6,14 +6,22 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
-  # DAY 9 PREVIEW: We will uncomment this tomorrow for RAG!
-  # pgvector:
-  #   image: pgvector/pgvector:pg16
-  #   container_name: sentinel-postgres
-  #   environment:
-  #     POSTGRES_USER: sentinel
-  #     POSTGRES_PASSWORD: password
-  #     POSTGRES_DB: sentinel_db
-  #   ports:
-  #     - "5432:5432"
-  #   restart: unless-stopped
+  # DAY 9 For RAG
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: sentinel-postgres
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: sentinel_db
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  # Day 10 For LLM and Embedding
+  sentinel-ai-engine:
+    image: ghcr.io/sujeet-banerjee/sentinel/sentinel-ollama-llama3:latest
+    ports:
+      - "11434:11434"
+    # No start.sh script or runtime pulling required!
+    restart: unless-stopped

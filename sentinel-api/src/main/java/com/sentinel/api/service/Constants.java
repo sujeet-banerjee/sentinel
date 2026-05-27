@@ -3,7 +3,7 @@ package com.sentinel.api.service;
 import java.time.Duration;
 
 public interface Constants {
-	String HEADER_TENANT_ID = " X-Sentinel-Tenant-ID";
+	String HEADER_TENANT_ID = "X-Sentinel-Tenant-ID";
 	String DEFAULT_LOCAL_TENANT = "DEFAULT_LOCAL_TENANT";
 	String TENANT_ID = "TENANT_ID";
 	String SESSION_ID = "SESSION_ID";
