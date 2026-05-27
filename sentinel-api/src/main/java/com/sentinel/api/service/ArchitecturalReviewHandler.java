@@ -99,81 +99,80 @@ public class ArchitecturalReviewHandler implements WebSocketHandler {
          * The return type of session.send() is Mono<Void>, which signifies 
          * the completion of the "send" operation.
          * 
-         * For now, just echoing the message back!
          */
     	return session.send(
-                session.receive()
-                	// CRITICAL: Tells the server "Only expect one message, then close"
-                	//.take(1) 
-                	// Just to log
-                    .doOnNext(msg -> log.debug("INBOUND: {}", msg.getPayloadAsText()))
-                    // msg (WebSocketMessage) to ReviewRequest record (deser)
-                    .map(msg -> {
-                        try {
-                            // Attempt to parse JSON into our ReviewRequest record
-                            return objectMapper.readValue(msg.getPayloadAsText(), ReviewRequest.class);
-                        } catch (Exception e) {
-                            // Fallback: If they send plain text, we wrap it manually
-                            log.warn("Invalid JSON received, using fallback wrapper");
-                            return new ReviewRequest(msg.getPayloadAsText(), "General", 3);
-                        }
-                    })
-                    /*
-                     * flatMap is the key here. It takes one ReviewRequest and 
-                     * "flattens" the Flux<String> from the Analysis-service into 
-                     * the main outbound stream.
-                     */
-                    // --- DAY 7: RATE LIMITER INTERCEPTION ---
-                    .flatMap(request -> rateLimiterService.isAllowed(tenantId, session.getId())
-                        .flatMapMany(rateLimitResult -> {
-                        	boolean isAllowed = rateLimitResult.getFirst();
-                            long waitSeconds = rateLimitResult.getSecond();
-                            
-                            if (!isAllowed) {
-                                /*
-                                 * If blocked, emit a single error chunk and 
-                                 * cleanly terminate this sub-stream
-                                 */
-                                SentinelChunk rejection = new SentinelChunk(
-                                		String.format(
-                                				Constants.ERR_TEMPL_RATE_LIMIT_EXCEED, 
-                                				waitSeconds),
-                                        SentinelChunk.ChunkType.RATE_LIMIT_EXCEEDED, 
-                                        System.currentTimeMillis());
-                                return Flux.just(rejection);
-                            }
-                            
-                            // If allowed, proceed to the expensive LLM execution
-                            return analysisService.analyze(request);
-                        })
-                    )
-                    /*
-                     * We got the SentinelChunk!
-                     * Now, Write the response (as serialized string)
-                     */
-                    .map(chunk -> {
-                    	try {
-                            String jsonResponse = objectMapper.writeValueAsString(chunk);
-                            log.debug("ENRICHED STREAMING: {}", jsonResponse);
-                            return session.textMessage(jsonResponse);
-                        } catch (Exception e) {
-                            log.error("Failed to serialize SentinelChunk", e);
-                            return session.textMessage(
-                            		"{\"content\":\"Error serializing response\","
-                            		+ "\"type\":\"TEXT\"}");
-                        }
-                    })
-                    // Logging complete event!
-                    .doOnComplete(() -> log.info("Analysis Service Finished")))
-    		.doOnTerminate(
-        		() -> log.info("Connection closed for session: {}", session.getId()))
-    		.contextWrite(
-    			/*
-    			 * Inject the Tenant ID and Session ID into the reactive pipeline's context
-    			 * Both used as the composite key to access Redis memory
-    			 */
-    			Context.of(Constants.TENANT_ID, resolvedTenantId, 
-    					Constants.SESSION_ID, session.getId()))
-    		.then();
+            session.receive()
+        	// CRITICAL: Tells the server "Only expect one message, then close"
+        	//.take(1) 
+        	// Just to log
+            .doOnNext(msg -> log.debug("INBOUND: {}", msg.getPayloadAsText()))
+            // msg (WebSocketMessage) to ReviewRequest record (deser)
+            .map(msg -> {
+                try {
+                    // Attempt to parse JSON into our ReviewRequest record
+                    return objectMapper.readValue(msg.getPayloadAsText(), ReviewRequest.class);
+                } catch (Exception e) {
+                    // Fallback: If they send plain text, we wrap it manually
+                    log.warn("Invalid JSON received, using fallback wrapper");
+                    return new ReviewRequest(msg.getPayloadAsText(), "General", 3);
+                }
+            })
+            /*
+             * flatMap is the key here. It takes one ReviewRequest and 
+             * "flattens" the Flux<String> from the Analysis-service into 
+             * the main outbound stream.
+             */
+            // --- DAY 7: RATE LIMITER INTERCEPTION ---
+            .flatMap(request -> rateLimiterService.isAllowed(tenantId, session.getId())
+                .flatMapMany(rateLimitResult -> {
+                	boolean isAllowed = rateLimitResult.getFirst();
+                    long waitSeconds = rateLimitResult.getSecond();
+                    
+                    if (!isAllowed) {
+                        /*
+                         * If blocked, emit a single error chunk and 
+                         * cleanly terminate this sub-stream
+                         */
+                        SentinelChunk rejection = new SentinelChunk(
+                        		String.format(
+                        				Constants.ERR_TEMPL_RATE_LIMIT_EXCEED, 
+                        				waitSeconds),
+                                SentinelChunk.ChunkType.RATE_LIMIT_EXCEEDED, 
+                                System.currentTimeMillis());
+                        return Flux.just(rejection);
+                    }
+                    
+                    // If allowed, proceed to the expensive LLM execution
+                    return analysisService.analyze(request);
+                })
+            )
+            /*
+             * We got the SentinelChunk!
+             * Now, Write the response (as serialized string)
+             */
+            .map(chunk -> {
+            	try {
+                    String jsonResponse = objectMapper.writeValueAsString(chunk);
+                    log.debug("ENRICHED STREAMING: {}", jsonResponse);
+                    return session.textMessage(jsonResponse);
+                } catch (Exception e) {
+                    log.error("Failed to serialize SentinelChunk", e);
+                    return session.textMessage(
+                    		"{\"content\":\"Error serializing response\","
+                    		+ "\"type\":\"TEXT\"}");
+                }
+            })
+            // Logging complete event!
+            .doOnComplete(() -> log.info("Analysis Service Finished")))
+			.doOnTerminate(
+					() -> log.info("Connection closed for session: {}", session.getId()))
+			.contextWrite(
+			/*
+			 * Inject the Tenant ID and Session ID into the reactive pipeline's context
+			 * Both used as the composite key to access Redis memory
+			 */
+					Context.of(Constants.TENANT_ID, resolvedTenantId, 
+							Constants.SESSION_ID, session.getId()))
+			.then();
     }
 }

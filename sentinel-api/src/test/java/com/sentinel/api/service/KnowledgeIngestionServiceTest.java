@@ -131,14 +131,15 @@ class KnowledgeIngestionServiceTest {
     
     @BeforeAll
     static void pullEmbeddingModel() throws Exception {
-        /* Our custom GHCR image only has Llama 3. 
-         * We dynamically pull the embedding model here.
+        /* Our custom GHCR image only now has:
+         * - llama3
+         * - nomic embedder
          */
-        log.info("Pulling nomic-embed-text model into Ollama container...");
-        log.info("This will take ~10-20 seconds on the very first run, and 0 "
-        		+ "seconds on future runs.");
-        
-        ollama.execInContainer("ollama", "pull", "nomic-embed-text");
+//        log.info("Pulling nomic-embed-text model into Ollama container...");
+//        log.info("This will take ~10-20 seconds on the very first run, and 0 "
+//        		+ "seconds on future runs.");
+//        
+//        ollama.execInContainer("ollama", "pull", "nomic-embed-text");
         
         log.info("Embedding model is ready!");
     }
