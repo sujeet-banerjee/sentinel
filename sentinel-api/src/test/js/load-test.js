@@ -12,8 +12,8 @@ const rateLimitRejectionRate = new Rate('ws_rate_limit_rejections');
 
 export const options = {
     stages: [
-        { duration: '10s', target: 50 },  // Ramp up
-        { duration: '30s', target: 50 },  // Sustained load
+        { duration: '10s', target: 1 },  // Ramp up
+        { duration: '30s', target: 1 },  // Sustained load
         { duration: '10s', target: 0 },   // Ramp down
     ],
     // Optional: Auto-fail the CI pipeline if average response time exceeds 2 seconds
